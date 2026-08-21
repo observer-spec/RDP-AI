@@ -36,7 +36,7 @@ jobs:
         run: |
           mkdir -p workspace
 
-      - name: Install Desktop GUI, VNC Server & noVNC Web Client
+      - name: Install Desktop GUI, VNC Server & Websockify
         run: |
           sudo apt-get update -y
           sudo apt-get install -y xvfb xfce4 xfce4-goodies x11vnc scrot imagemagick dbus-x11 novnc websockify
@@ -51,12 +51,15 @@ jobs:
           
           # 3. Start x11vnc server on port 5900
           x11vnc -display :99 -nopw -forever -shared -bg -rfbport 5900
+          
+          # 4. Start native websockify bridge (port 6080 -> 5900)
+          websockify --web /usr/share/novnc/ 6080 localhost:5900 &
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Install Dependencies & Headless Browser
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi uvicorn pydantic requests playwright psutil websockets
+          pip install fastapi uvicorn pydantic requests playwright psutil
           python -m playwright install --with-deps chromium
 
       - name: Install Cloudflare Tunnel
@@ -73,8 +76,8 @@ jobs:
           python server.py &
           sleep 3
           
-          # Start cloudflared tunnel
-          cloudflared tunnel --url http://127.0.0.1:8000 2>&1 | tee tunnel.log &
+          # Start cloudflared tunnel forwarding to native websockify (port 6080)
+          cloudflared tunnel --url http://127.0.0.1:6080 2>&1 | tee tunnel.log &
           
           echo "Waiting for tunnel to initialize..."
           for i in {1..30}; do
@@ -82,9 +85,8 @@ jobs:
             if [ -n "$TUNNEL_URL" ]; then
               echo "==============================================================="
               echo "☁️ WEB DESKTOP & MCP SERVER ONLINE!"
-              echo "🔗 Interactive Web RDP Desktop: $TUNNEL_URL"
-              echo "⚡ MCP Endpoint: $TUNNEL_URL/mcp"
-              echo "🛠️ Tools Endpoint: $TUNNEL_URL/tools"
+              echo "🔗 Interactive Web RDP Desktop: $TUNNEL_URL/vnc.html?autoconnect=true&resize=scale"
+              echo "⚡ MCP Endpoint: http://127.0.0.1:8000/mcp"
               echo "📁 Persistent Workspace: $WORKSPACE_DIR"
               echo "==============================================================="
               break
