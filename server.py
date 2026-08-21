@@ -1,6 +1,6 @@
 """
-Persistent Super-Utility MCP Remote Server v3.1 (Linux Edition with Web GUI Desktop)
-Self-contained noVNC bundle with permissive CSP headers for browser control.
+Persistent Super-Utility MCP Remote Server v3.2 (Native Web Desktop + MCP)
+Exposes noVNC client, native websockify bridge, and full 14 MCP tools.
 """
 
 import os
@@ -14,9 +14,9 @@ import base64
 import urllib.request
 import re
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Header, HTTPException, Depends, WebSocket, WebSocketDisconnect, Response
+from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -28,7 +28,7 @@ HISTORY_FILE = os.path.join(WORKSPACE_DIR, "command_history.log")
 
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
-app = FastAPI(title="Persistent Linux MCP Cloud Runner with Web Desktop", version="3.1.0")
+app = FastAPI(title="Persistent Linux MCP Cloud Runner with Web Desktop", version="3.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,17 +38,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def add_security_headers(request, call_next):
-    response = await call_next(request)
-    # Permissive CSP for noVNC web client
-    response.headers["Content-Security-Policy"] = "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: ws: wss:; script-src * 'unsafe-inline' 'unsafe-eval' blob:; connect-src * ws: wss:;"
-    return response
-
-# Mount local noVNC if installed
 NOVNC_DIR = "/usr/share/novnc"
 if os.path.exists(NOVNC_DIR):
-    app.mount("/novnc", StaticFiles(directory=NOVNC_DIR), name="novnc")
+    app.mount("/novnc", StaticFiles(directory=NOVNC_DIR, html=True), name="novnc")
 
 def verify_token(authorization: Optional[str] = Header(None)):
     if AUTH_TOKEN:
@@ -101,52 +93,6 @@ async def get_browser_page():
     
     return browser_page, None
 
-# --- Web Desktop WebSocket Proxy (noVNC <-> x11vnc on 5900) ---
-
-@app.websocket("/websockify")
-async def websocket_vnc_bridge(websocket: WebSocket):
-    await websocket.accept(subprotocols=["binary"])
-    try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", 5900)
-    except Exception as e:
-        await websocket.close(code=1011, reason=f"VNC connection error: {str(e)}")
-        return
-
-    async def ws_to_tcp():
-        try:
-            while True:
-                data = await websocket.receive_bytes()
-                writer.write(data)
-                await writer.drain()
-        except (WebSocketDisconnect, asyncio.CancelledError):
-            pass
-        except Exception:
-            pass
-        finally:
-            writer.close()
-
-    async def tcp_to_ws():
-        try:
-            while True:
-                data = await reader.read(8192)
-                if not data:
-                    break
-                await websocket.send_bytes(data)
-        except (WebSocketDisconnect, asyncio.CancelledError):
-            pass
-        except Exception:
-            pass
-        finally:
-            try:
-                await websocket.close()
-            except Exception:
-                pass
-
-    try:
-        await asyncio.gather(ws_to_tcp(), tcp_to_ws())
-    except Exception:
-        pass
-
 # --- Base URL Web Dashboard & Embedded Desktop GUI ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -186,7 +132,7 @@ def index_web_gui():
     </div>
   </header>
 
-  <iframe src="/novnc/vnc.html?path=websockify&autoconnect=true&resize=scale&reconnect=true"></iframe>
+  <iframe src="/novnc/vnc.html?autoconnect=true&resize=scale&reconnect=true"></iframe>
 
   <script>
     function toggleFullscreen() {
@@ -774,7 +720,7 @@ async def mcp_rpc(req: JsonRpcRequest):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "3.1.0"}
+                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "3.2.0"}
             }
         }
     else:
