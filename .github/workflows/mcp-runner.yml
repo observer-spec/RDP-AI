@@ -36,11 +36,26 @@ jobs:
         run: |
           mkdir -p workspace
 
-      - name: Install Desktop GUI & Chromium Web Browser
+      - name: Install Desktop GUI & Native Google Chrome
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser openssl wget curl
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl libu2f-udev libvulkan1
+
+          # Install official Google Chrome (native deb without snap)
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+          rm google-chrome-stable_current_amd64.deb
+
+          # Configure Chrome as the default x-www-browser with --no-sandbox wrapper for root/runner
+          sudo cp /usr/bin/google-chrome-stable /usr/bin/google-chrome-orig
+          cat << 'EOF' | sudo tee /usr/bin/google-chrome-stable
+          #!/bin/sh
+          exec /usr/bin/google-chrome-orig --no-sandbox --disable-dev-shm-usage "$@"
+          EOF
+          sudo chmod +x /usr/bin/google-chrome-stable
+          sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/google-chrome-stable 200
+          sudo update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
 
       - name: Install High-Performance KasmVNC (WebP/H.264 60FPS Streaming)
         run: |
@@ -68,7 +83,7 @@ jobs:
           # 3. Setup password non-interactively for user runner (password: 123456)
           echo -e "123456\n123456\n" | kasmvncpasswd -u runner -o -w
           
-          # 4. Setup user kasmvnc config with custom cert paths
+          # 4. Setup user kasmvnc config
           cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
