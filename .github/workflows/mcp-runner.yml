@@ -1,0 +1,116 @@
+name: Cloudflare MCP Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_token:
+        description: 'Optional Auth Token/Secret for MCP access'
+        required: false
+        default: 'mcp-secret-key-123'
+      runner_os:
+        description: 'Target OS'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
+
+jobs:
+  run-mcp:
+    runs-on: ${{ github.event.inputs.runner_os || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn pydantic requests
+
+      - name: Install Cloudflare Tunnel (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
+          rm cloudflared-linux-amd64.deb
+
+      - name: Install Cloudflare Tunnel (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.msi" -OutFile "cloudflared.msi"
+          Start-Process msiexec.exe -ArgumentList '/i cloudflared.msi /quiet /qn /norestart' -NoNewWindow -Wait
+          Remove-Item cloudflared.msi
+
+      - name: Start MCP Server & Tunnel (Linux)
+        if: runner.os == 'Linux'
+        env:
+          AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
+        run: |
+          python server.py &
+          sleep 3
+          
+          # Start cloudflared tunnel
+          cloudflared tunnel --url http://127.0.0.1:8000 2>&1 | tee tunnel.log &
+          
+          echo "Waiting for tunnel to initialize..."
+          for i in {1..30}; do
+            TUNNEL_URL=$(grep -o 'https://[-a-zA-Z0-9@:%._\+~#=]\+\.trycloudflare\.com' tunnel.log | head -n 1 || true)
+            if [ -n "$TUNNEL_URL" ]; then
+              echo "==============================================================="
+              echo "MCP SERVER ONLINE!"
+              echo "URL: $TUNNEL_URL"
+              echo "MCP Endpoint: $TUNNEL_URL/mcp"
+              echo "Tools Endpoint: $TUNNEL_URL/tools"
+              echo "Auth Token: $AUTH_TOKEN"
+              echo "==============================================================="
+              break
+            fi
+            sleep 1
+          done
+          
+          # Keep alive
+          while true; do
+            echo "Runner active: $(date)"
+            sleep 300
+          done
+
+      - name: Start MCP Server & Tunnel (Windows)
+        if: runner.os == 'Windows'
+        env:
+          AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
+        run: |
+          Start-Process python -ArgumentList "server.py"
+          Start-Sleep -Seconds 3
+          
+          $logPath = "$env:TEMP\tunnel.log"
+          Start-Process "cloudflared.exe" -ArgumentList "tunnel --url http://127.0.0.1:8000" -RedirectStandardError $logPath
+          
+          Write-Host "Waiting for Cloudflare Tunnel URL..."
+          for ($i = 0; $i -lt 30; $i++) {
+              if (Test-Path $logPath) {
+                  $content = Get-Content $logPath -Raw
+                  if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+                      $url = $matches[0]
+                      Write-Host "==============================================================="
+                      Write-Host "MCP SERVER ONLINE!"
+                      Write-Host "URL: $url"
+                      Write-Host "MCP Endpoint: $url/mcp"
+                      Write-Host "Tools Endpoint: $url/tools"
+                      Write-Host "Auth Token: $env:AUTH_TOKEN"
+                      Write-Host "==============================================================="
+                      break
+                  }
+              }
+              Start-Sleep -Seconds 1
+          }
+          
+          while ($true) {
+              Write-Host "Runner active: $(Get-Date)"
+              Start-Sleep -Seconds 300
+          }
