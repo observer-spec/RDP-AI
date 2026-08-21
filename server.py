@@ -1,12 +1,13 @@
 """
-Persistent Super-Utility MCP Remote Server for GitHub Actions Runners.
+Persistent Super-Utility MCP Remote Server v2.1 for GitHub Actions Runners.
 Includes:
-- File Management & Fast Content Search (grep)
-- Shell & Direct Python Code Execution
-- Real Headless Browser Automation (Playwright Chromium)
-- Web Fetching & File Downloading
-- Process Management
-- Persistent Memory & Workspace State Caching
+- Screen Capture (Xvfb virtual display screenshot + Playwright browser screenshot)
+- Computer / Browser GUI Control (navigate, click, type, JS, scroll)
+- Direct Python Code Evaluation & Shell Execution
+- File Management, Fast Search (grep), Direct URL Download & Zip Extract
+- Network Tools (HTTP Requests, curl, DNS check)
+- Process Manager (Inspect CPU/RAM & Kill)
+- Durable Memory & Workspace State Caching
 """
 
 import os
@@ -32,7 +33,7 @@ HISTORY_FILE = os.path.join(WORKSPACE_DIR, "command_history.log")
 
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
-app = FastAPI(title="Persistent Super-Utility MCP Remote Server", version="2.0.0")
+app = FastAPI(title="Persistent Super-Utility MCP Remote Server", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,7 +69,7 @@ def log_history(entry: str):
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {entry}\n")
 
-# --- Browser Session State (Playwright) ---
+# --- Playwright Browser State ---
 
 browser_instance = None
 browser_page = None
@@ -84,8 +85,11 @@ async def get_browser_page():
     if browser_page is None or browser_page.is_closed():
         if playwright_obj is None:
             playwright_obj = await async_playwright().start()
-        browser_instance = await playwright_obj.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = await browser_instance.new_context(viewport={"width": 1280, "height": 800})
+        browser_instance = await playwright_obj.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+        )
+        context = await browser_instance.new_context(viewport={"width": 1920, "height": 1080})
         browser_page = await context.new_page()
     
     return browser_page, None
@@ -94,8 +98,46 @@ async def get_browser_page():
 
 TOOLS = [
     {
+        "name": "take_screenshot",
+        "description": "Capture a screenshot of either the active browser page or the virtual desktop display (X11). Returns base64 image data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "enum": ["browser", "desktop"], "default": "browser", "description": "Whether to capture active web page or X11 desktop display"},
+                "full_page": {"type": "boolean", "default": False, "description": "If browser, capture full scrollable page"}
+            }
+        }
+    },
+    {
+        "name": "browser_open",
+        "description": "Navigate real Chromium browser to a URL. Returns page title, text content, and high-res screenshot.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Web URL to open"},
+                "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle"], "default": "domcontentloaded"},
+                "capture_screenshot": {"type": "boolean", "default": True}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "browser_interact",
+        "description": "Perform actions in the active browser: click, type, evaluate JavaScript, scroll, or extract HTML.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["click", "type", "evaluate_js", "screenshot", "get_html", "scroll"]},
+                "selector": {"type": "string", "description": "CSS selector or text for click/type"},
+                "text": {"type": "string", "description": "Text to type"},
+                "script": {"type": "string", "description": "JavaScript code to evaluate"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "execute_command",
-        "description": "Execute any shell command (bash/cmd/PowerShell) on the runner VM.",
+        "description": "Execute any bash or shell command on the runner VM.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -149,48 +191,36 @@ TOOLS = [
             "properties": {
                 "path": {"type": "string", "description": "Directory to search in", "default": "."},
                 "pattern": {"type": "string", "description": "Regex pattern or glob to search for"},
-                "target": {"type": "string", "enum": ["files", "content"], "default": "content", "description": "'files' to find matching filenames, 'content' to grep inside files"}
+                "target": {"type": "string", "enum": ["files", "content"], "default": "content"}
             },
             "required": ["pattern"]
         }
     },
     {
         "name": "download_file",
-        "description": "Download any file or dataset from a public URL directly into the workspace.",
+        "description": "Download any file or dataset from a public URL directly into the workspace, with optional auto-unzip.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "HTTP/HTTPS download URL"},
-                "save_as": {"type": "string", "description": "Target filename in workspace (optional)"}
+                "save_as": {"type": "string", "description": "Target filename in workspace (optional)"},
+                "extract_archive": {"type": "boolean", "default": False, "description": "Auto extract if zip/tar.gz"}
             },
             "required": ["url"]
         }
     },
     {
-        "name": "browser_open",
-        "description": "Navigate real headless Chromium browser to a URL. Returns page title, text content, and screenshot.",
+        "name": "http_request",
+        "description": "Perform HTTP GET, POST, PUT, DELETE requests directly from the cloud VM datacenter IP.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "Web URL to open (e.g. https://example.com)"},
-                "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle"], "default": "domcontentloaded"},
-                "capture_screenshot": {"type": "boolean", "default": True, "description": "Whether to return base64 screenshot"}
+                "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "default": "GET"},
+                "url": {"type": "string", "description": "Target URL"},
+                "headers": {"type": "object", "description": "Request headers"},
+                "json_body": {"type": "object", "description": "JSON payload (for POST/PUT)"}
             },
             "required": ["url"]
-        }
-    },
-    {
-        "name": "browser_interact",
-        "description": "Perform actions in the active browser: click, type, evaluate JavaScript, or take screenshot.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["click", "type", "evaluate_js", "screenshot", "get_html", "scroll"]},
-                "selector": {"type": "string", "description": "CSS or text selector for click/type"},
-                "text": {"type": "string", "description": "Text to type"},
-                "script": {"type": "string", "description": "JavaScript code to evaluate"}
-            },
-            "required": ["action"]
         }
     },
     {
@@ -237,6 +267,113 @@ TOOLS = [
 ]
 
 # --- Tool Implementations ---
+
+async def handle_take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
+    target = args.get("target", "browser")
+    full_page = args.get("full_page", False)
+    
+    if target == "browser":
+        page, err = await get_browser_page()
+        if err:
+            return {"error": err}
+        try:
+            screenshot_bytes = await page.screenshot(type="jpeg", quality=80, full_page=full_page)
+            b64_img = base64.b64encode(screenshot_bytes).decode("utf-8")
+            log_history("TAKE_SCREENSHOT: Browser captured")
+            return {
+                "success": True,
+                "target": "browser",
+                "current_url": page.url,
+                "image_format": "jpeg",
+                "screenshot_base64": b64_img
+            }
+        except Exception as e:
+            return {"error": f"Browser screenshot failed: {str(e)}"}
+    else:
+        # Desktop / X11 display screenshot via scrot or import
+        try:
+            out_path = os.path.join(WORKSPACE_DIR, "desktop_screenshot.jpg")
+            res = subprocess.run(f"DISPLAY=:99 scrot -q 80 {out_path} 2>/dev/null || import -window root {out_path} 2>/dev/null", shell=True)
+            if os.path.exists(out_path):
+                with open(out_path, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "success": True,
+                    "target": "desktop",
+                    "image_format": "jpeg",
+                    "screenshot_base64": b64_img
+                }
+            else:
+                return {"error": "No virtual X11 display active or scrot/import tool missing."}
+        except Exception as e:
+            return {"error": str(e)}
+
+async def handle_browser_open(args: Dict[str, Any]) -> Dict[str, Any]:
+    url = args.get("url", "")
+    wait_until = args.get("wait_until", "domcontentloaded")
+    capture_screenshot = args.get("capture_screenshot", True)
+    
+    page, err = await get_browser_page()
+    if err:
+        return {"error": err}
+    
+    try:
+        await page.goto(url, wait_until=wait_until, timeout=30000)
+        title = await page.title()
+        text_content = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 5000) : ''")
+        
+        res = {
+            "title": title,
+            "url": page.url,
+            "text_preview": text_content,
+            "status": "loaded"
+        }
+        
+        if capture_screenshot:
+            screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
+            res["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("utf-8")
+        
+        log_history(f"BROWSER_GOTO: {url} (Title: {title[:40]})")
+        return res
+    except Exception as e:
+        return {"error": f"Browser navigation failed: {str(e)}"}
+
+async def handle_browser_interact(args: Dict[str, Any]) -> Dict[str, Any]:
+    action = args.get("action")
+    selector = args.get("selector")
+    text = args.get("text", "")
+    script = args.get("script", "")
+    
+    page, err = await get_browser_page()
+    if err:
+        return {"error": err}
+    
+    try:
+        if action == "click":
+            await page.click(selector, timeout=10000)
+            return {"success": True, "action": "click", "selector": selector}
+        elif action == "type":
+            await page.fill(selector, text, timeout=10000)
+            return {"success": True, "action": "type", "selector": selector}
+        elif action == "evaluate_js":
+            result = await page.evaluate(script)
+            return {"success": True, "action": "evaluate_js", "result": result}
+        elif action == "screenshot":
+            screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
+            return {
+                "success": True,
+                "screenshot_base64": base64.b64encode(screenshot_bytes).decode("utf-8")
+            }
+        elif action == "get_html":
+            html = await page.content()
+            return {"html_length": len(html), "html_preview": html[:4000]}
+        elif action == "scroll":
+            await page.evaluate("window.scrollBy(0, 600)")
+            return {"success": True, "action": "scroll"}
+        else:
+            return {"error": f"Unknown browser action: {action}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 async def handle_execute_command(args: Dict[str, Any]) -> Dict[str, Any]:
     cmd = args.get("command", "")
@@ -357,84 +494,48 @@ async def handle_search_files(args: Dict[str, Any]) -> Dict[str, Any]:
 async def handle_download_file(args: Dict[str, Any]) -> Dict[str, Any]:
     url = args.get("url", "")
     save_as = args.get("save_as") or os.path.basename(url.split("?")[0]) or "downloaded_file"
+    extract_archive = args.get("extract_archive", False)
     target_path = os.path.join(WORKSPACE_DIR, save_as)
     
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=30) as response, open(target_path, "wb") as out_file:
+        with urllib.request.urlopen(req, timeout=45) as response, open(target_path, "wb") as out_file:
             data = response.read()
             out_file.write(data)
+        
+        extracted = False
+        if extract_archive and (save_as.endswith(".zip") or save_as.endswith(".tar.gz")):
+            if save_as.endswith(".zip"):
+                import zipfile
+                with zipfile.ZipFile(target_path, "r") as z:
+                    z.extractall(WORKSPACE_DIR)
+                extracted = True
+            elif save_as.endswith(".tar.gz") or save_as.endswith(".tgz"):
+                import tarfile
+                with tarfile.open(target_path, "r:gz") as t:
+                    t.extractall(WORKSPACE_DIR)
+                extracted = True
+        
         log_history(f"DOWNLOAD: {url} -> {save_as} ({len(data)} bytes)")
-        return {"success": True, "saved_path": target_path, "size_bytes": len(data)}
+        return {"success": True, "saved_path": target_path, "size_bytes": len(data), "extracted": extracted}
     except Exception as e:
         return {"error": str(e)}
 
-async def handle_browser_open(args: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_http_request(args: Dict[str, Any]) -> Dict[str, Any]:
+    import requests as py_requests
+    method = args.get("method", "GET").upper()
     url = args.get("url", "")
-    wait_until = args.get("wait_until", "domcontentloaded")
-    capture_screenshot = args.get("capture_screenshot", True)
-    
-    page, err = await get_browser_page()
-    if err:
-        return {"error": err}
+    headers = args.get("headers", {})
+    json_body = args.get("json_body", None)
     
     try:
-        await page.goto(url, wait_until=wait_until, timeout=30000)
-        title = await page.title()
-        
-        # Extract readable body text
-        text_content = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 5000) : ''")
-        
-        res = {
-            "title": title,
-            "url": page.url,
-            "text_preview": text_content,
-            "status": "loaded"
+        resp = py_requests.request(method=method, url=url, headers=headers, json=json_body, timeout=30)
+        return {
+            "status_code": resp.status_code,
+            "headers": dict(resp.headers),
+            "text": resp.text[:4000],
+            "is_json": "application/json" in resp.headers.get("Content-Type", "")
         }
-        
-        if capture_screenshot:
-            screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
-            res["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("utf-8")
-        
-        log_history(f"BROWSER_GOTO: {url} (Title: {title[:40]})")
-        return res
-    except Exception as e:
-        return {"error": f"Browser navigation failed: {str(e)}"}
-
-async def handle_browser_interact(args: Dict[str, Any]) -> Dict[str, Any]:
-    action = args.get("action")
-    selector = args.get("selector")
-    text = args.get("text", "")
-    script = args.get("script", "")
-    
-    page, err = await get_browser_page()
-    if err:
-        return {"error": err}
-    
-    try:
-        if action == "click":
-            await page.click(selector, timeout=10000)
-            return {"success": True, "action": "click", "selector": selector}
-        elif action == "type":
-            await page.fill(selector, text, timeout=10000)
-            return {"success": True, "action": "type", "selector": selector}
-        elif action == "evaluate_js":
-            result = await page.evaluate(script)
-            return {"success": True, "action": "evaluate_js", "result": result}
-        elif action == "screenshot":
-            screenshot_bytes = await page.screenshot(type="jpeg", quality=75)
-            return {
-                "success": True,
-                "screenshot_base64": base64.b64encode(screenshot_bytes).decode("utf-8")
-            }
-        elif action == "get_html":
-            html = await page.content()
-            return {"html_length": len(html), "html_preview": html[:4000]}
-        elif action == "scroll":
-            await page.evaluate("window.scrollBy(0, 600)")
-            return {"success": True, "action": "scroll"}
-        else:
-            return {"error": f"Unknown browser action: {action}"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -477,7 +578,6 @@ async def handle_process_manager(args: Dict[str, Any]) -> Dict[str, Any]:
                 pass
         return {"processes": proc_list[:30], "total_count": len(proc_list)}
     except ImportError:
-        # Fallback to ps aux
         res = subprocess.run("ps aux --sort=-%cpu | head -25", shell=True, capture_output=True, text=True)
         return {"stdout": res.stdout}
 
@@ -495,14 +595,16 @@ async def handle_system_info(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 HANDLERS = {
+    "take_screenshot": handle_take_screenshot,
+    "browser_open": handle_browser_open,
+    "browser_interact": handle_browser_interact,
     "execute_command": handle_execute_command,
     "python_eval": handle_python_eval,
     "read_file": handle_read_file,
     "write_file": handle_write_file,
     "search_files": handle_search_files,
     "download_file": handle_download_file,
-    "browser_open": handle_browser_open,
-    "browser_interact": handle_browser_interact,
+    "http_request": handle_http_request,
     "memory_store": handle_memory_store,
     "memory_recall": handle_memory_recall,
     "process_manager": handle_process_manager,
@@ -526,7 +628,7 @@ def index():
     return {
         "status": "online",
         "service": "Persistent Super-Utility MCP Remote Server",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "tools_count": len(TOOLS),
         "workspace": WORKSPACE_DIR
     }
@@ -577,7 +679,7 @@ async def mcp_rpc(req: JsonRpcRequest):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "2.0.0"}
+                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "2.1.0"}
             }
         }
     else:
