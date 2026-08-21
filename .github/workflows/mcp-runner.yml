@@ -16,6 +16,10 @@ on:
           - ubuntu-latest
           - windows-latest
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   run-mcp:
     runs-on: ${{ github.event.inputs.runner_os || 'ubuntu-latest' }}
@@ -27,6 +31,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Restore Persistent State & Workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace
+          key: mcp-workspace-${{ github.run_id }}
+          restore-keys: |
+            mcp-workspace-
+
+      - name: Initialize Workspace Directory
+        run: |
+          mkdir -p workspace
 
       - name: Install Dependencies
         run: |
@@ -51,6 +67,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
+          WORKSPACE_DIR: ${{ github.workspace }}/workspace
         run: |
           python server.py &
           sleep 3
@@ -67,16 +84,17 @@ jobs:
               echo "URL: $TUNNEL_URL"
               echo "MCP Endpoint: $TUNNEL_URL/mcp"
               echo "Tools Endpoint: $TUNNEL_URL/tools"
-              echo "Auth Token: $AUTH_TOKEN"
+              echo "Persistent Workspace: $WORKSPACE_DIR"
               echo "==============================================================="
               break
             fi
             sleep 1
           done
           
-          # Keep alive
-          while true; do
-            echo "Runner active: $(date)"
+          # Keep alive loop (runs for 5 hours max before clean handoff)
+          # Loops every 5 minutes and saves state timestamp
+          for tick in {1..60}; do
+            echo "Runner tick $tick: $(date)"
             sleep 300
           done
 
@@ -84,6 +102,7 @@ jobs:
         if: runner.os == 'Windows'
         env:
           AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
+          WORKSPACE_DIR: ${{ github.workspace }}/workspace
         run: |
           Start-Process python -ArgumentList "server.py"
           Start-Sleep -Seconds 3
@@ -101,8 +120,7 @@ jobs:
                       Write-Host "MCP SERVER ONLINE!"
                       Write-Host "URL: $url"
                       Write-Host "MCP Endpoint: $url/mcp"
-                      Write-Host "Tools Endpoint: $url/tools"
-                      Write-Host "Auth Token: $env:AUTH_TOKEN"
+                      Write-Host "Persistent Workspace: $env:WORKSPACE_DIR"
                       Write-Host "==============================================================="
                       break
                   }
@@ -110,7 +128,14 @@ jobs:
               Start-Sleep -Seconds 1
           }
           
-          while ($true) {
-              Write-Host "Runner active: $(Get-Date)"
+          for ($tick = 1; $tick -le 60; $tick++) {
+              Write-Host "Runner tick $tick: $(Get-Date)"
               Start-Sleep -Seconds 300
           }
+
+      - name: Save Persistent State & Workspace Cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace
+          key: mcp-workspace-${{ github.run_id }}-${{ github.run_attempt }}
