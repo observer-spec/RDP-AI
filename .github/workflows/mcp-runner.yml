@@ -60,26 +60,20 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          # Setup KasmVNC config
+          # Setup KasmVNC 1.5 config
           cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
               require_ssl: false
-            websocket:
-              port: 8443
           desktop:
             resolution:
               width: 1920
               height: 1080
             allow_resize: true
-          encoding:
-            video_encoding: true
-            rect_encoding_mode: 0
-            default_quality: 9
           EOF
 
-          # Start KasmVNC Server on Display :1 (Web GUI on port 8443)
-          vncserver :1 -select-de xfce -disable-auth
+          # Start KasmVNC Server on Display :1 (Web GUI on port 8444)
+          vncserver :1 -select-de xfce -disable-auth -websocketPort 8443
           echo "DISPLAY=:1" >> $GITHUB_ENV
 
       - name: Install Python MCP Dependencies
