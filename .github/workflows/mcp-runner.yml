@@ -37,55 +37,35 @@ jobs:
         run: |
           mkdir -p workspace
 
-      - name: Install Desktop GUI, Google Chrome & Standalone Firefox
+      - name: Install Desktop GUI & Google Chrome
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl libu2f-udev libvulkan1 libgtk-3-0 libasound2t64 libdbus-glib-1-2
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl libu2f-udev libvulkan1
 
           # 1. Install Google Chrome (Official Deb)
           wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
           rm google-chrome-stable_current_amd64.deb
 
-          # 2. Install Official Mozilla Firefox Standalone (Bypasses snap completely)
-          wget -q "https://download.mozilla.org/?product=firefox-latest-ssl&os=linux64&lang=en-US" -O firefox.tar.bz2
-          sudo tar -xjf firefox.tar.bz2 -C /opt/
-          sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
-          rm firefox.tar.bz2
-
-          # 3. Create bulletproof wrapper for Chrome with --no-sandbox
-          sudo tee /usr/local/bin/chrome-launcher << 'EOF'
+          # 2. Create wrapper for Google Chrome with flags needed for container environments
+          sudo tee /usr/local/bin/google-chrome-runner << 'EOF'
           #!/bin/sh
-          exec /usr/bin/google-chrome-stable --no-sandbox --disable-dev-shm-usage --disable-gpu --password-store=basic "$@"
+          exec /usr/bin/google-chrome-stable --no-sandbox --disable-dev-shm-usage --disable-gpu --password-store=basic --no-first-run "$@"
           EOF
-          sudo chmod +x /usr/local/bin/chrome-launcher
+          sudo chmod +x /usr/local/bin/google-chrome-runner
 
-          # 4. Configure XFCE Default Browser & Mime Associations
-          mkdir -p /home/runner/.config/xfce4
-          mkdir -p /home/runner/.local/share/applications
+          # 3. Create desktop shortcut and default browser config
           mkdir -p /home/runner/Desktop
+          mkdir -p /home/runner/.config/xfce4
 
-          cat << 'EOF' > /home/runner/.config/xfce4/helpers.rc
-          WebBrowser=custom-WebBrowser
-          CustomWebBrowser=chrome-launcher
-          EOF
-
-          cat << 'EOF' > /home/runner/.config/mimeapps.list
-          [Default Applications]
-          text/html=google-chrome.desktop;firefox.desktop;
-          x-scheme-handler/http=google-chrome.desktop;firefox.desktop;
-          x-scheme-handler/https=google-chrome.desktop;firefox.desktop;
-          EOF
-
-          # 5. Place Working Desktop Shortcuts on the user's Desktop screen
           cat << 'EOF' > /home/runner/Desktop/Google-Chrome.desktop
           [Desktop Entry]
           Version=1.0
           Type=Application
           Name=Google Chrome
           Comment=Access the Internet
-          Exec=/usr/local/bin/chrome-launcher %U
+          Exec=/usr/local/bin/google-chrome-runner %U
           Icon=google-chrome
           Path=/home/runner
           Terminal=false
@@ -94,26 +74,11 @@ jobs:
           EOF
           chmod +x /home/runner/Desktop/Google-Chrome.desktop
 
-          cat << 'EOF' > /home/runner/Desktop/Firefox.desktop
-          [Desktop Entry]
-          Version=1.0
-          Type=Application
-          Name=Firefox Browser
-          Comment=Mozilla Firefox
-          Exec=/usr/local/bin/firefox %U
-          Icon=firefox
-          Path=/home/runner
-          Terminal=false
-          StartupNotify=true
-          Categories=Network;WebBrowser;
-          EOF
-          chmod +x /home/runner/Desktop/Firefox.desktop
-
-          # Set system default alternatives
-          sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/chrome-launcher 300
-          sudo update-alternatives --set x-www-browser /usr/local/bin/chrome-launcher
-          sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/chrome-launcher 300
-          sudo update-alternatives --set gnome-www-browser /usr/local/bin/chrome-launcher
+          # Register system alternatives so default application buttons work
+          sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/google-chrome-runner 300
+          sudo update-alternatives --set x-www-browser /usr/local/bin/google-chrome-runner
+          sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/google-chrome-runner 300
+          sudo update-alternatives --set gnome-www-browser /usr/local/bin/google-chrome-runner
 
       - name: Install High-Performance KasmVNC (WebP/H.264 60FPS Streaming)
         run: |
@@ -200,7 +165,7 @@ jobs:
               echo "- **Web Desktop URL:** [$TUNNEL_URL]($TUNNEL_URL)" >> $GITHUB_STEP_SUMMARY
               echo "- **Login Username:** \`runner\`" >> $GITHUB_STEP_SUMMARY
               echo "- **Login Password:** \`123456\`" >> $GITHUB_STEP_SUMMARY
-              echo "- **Pre-installed Browsers:** Google Chrome & Mozilla Firefox (placed on Desktop)" >> $GITHUB_STEP_SUMMARY
+              echo "- **Browser:** Google Chrome (Shortcut on Desktop)" >> $GITHUB_STEP_SUMMARY
               break
             fi
             sleep 1
