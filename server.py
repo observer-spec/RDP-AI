@@ -1,10 +1,6 @@
 """
-Persistent Super-Utility MCP Remote Server v3.0 (Linux Edition with Web GUI Desktop)
-Includes:
-- Full Web-based Interactive Desktop GUI (noVNC embedded at base URL /)
-- WebSocket-to-TCP VNC Proxy on port 8000
-- 14+ MCP Tools (Playwright Browser, Shell, Python eval, File/Search, Memory, System)
-- Persistent Workspace State & GitHub Cache Sync
+Persistent Super-Utility MCP Remote Server v3.1 (Linux Edition with Web GUI Desktop)
+Self-contained noVNC bundle with permissive CSP headers for browser control.
 """
 
 import os
@@ -18,9 +14,10 @@ import base64
 import urllib.request
 import re
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Header, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Depends, WebSocket, WebSocketDisconnect, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
@@ -31,7 +28,7 @@ HISTORY_FILE = os.path.join(WORKSPACE_DIR, "command_history.log")
 
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
-app = FastAPI(title="Persistent Linux MCP Cloud Runner with Web Desktop", version="3.0.0")
+app = FastAPI(title="Persistent Linux MCP Cloud Runner with Web Desktop", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,6 +37,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    # Permissive CSP for noVNC web client
+    response.headers["Content-Security-Policy"] = "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: ws: wss:; script-src * 'unsafe-inline' 'unsafe-eval' blob:; connect-src * ws: wss:;"
+    return response
+
+# Mount local noVNC if installed
+NOVNC_DIR = "/usr/share/novnc"
+if os.path.exists(NOVNC_DIR):
+    app.mount("/novnc", StaticFiles(directory=NOVNC_DIR), name="novnc")
 
 def verify_token(authorization: Optional[str] = Header(None)):
     if AUTH_TOKEN:
@@ -100,7 +109,7 @@ async def websocket_vnc_bridge(websocket: WebSocket):
     try:
         reader, writer = await asyncio.open_connection("127.0.0.1", 5900)
     except Exception as e:
-        await websocket.close(code=1011, reason=f"VNC server connection failed: {str(e)}")
+        await websocket.close(code=1011, reason=f"VNC connection error: {str(e)}")
         return
 
     async def ws_to_tcp():
@@ -138,7 +147,7 @@ async def websocket_vnc_bridge(websocket: WebSocket):
     except Exception:
         pass
 
-# --- Base URL Web Dashboard & Embedded noVNC GUI ---
+# --- Base URL Web Dashboard & Embedded Desktop GUI ---
 
 @app.get("/", response_class=HTMLResponse)
 def index_web_gui():
@@ -146,12 +155,11 @@ def index_web_gui():
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>RDP-AI Cloud Linux Runner</title>
+  <title>RDP-AI Cloud Linux Desktop</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js" type="module"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     header { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
     .title-group { display: flex; align-items: center; gap: 12px; }
     .badge-online { background: #238636; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; }
@@ -161,9 +169,7 @@ def index_web_gui():
     .btn:hover { background: #30363d; color: #fff; }
     .btn.primary { background: #238636; border-color: #2ea043; color: #fff; }
     .btn.primary:hover { background: #2ea043; }
-    #screen-container { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    #noVNC_canvas { width: 100%; height: 100%; object-fit: contain; }
-    #status-overlay { position: absolute; color: #8b949e; font-size: 14px; pointer-events: none; background: rgba(13,17,23,0.85); padding: 12px 20px; border-radius: 8px; border: 1px solid #30363d; }
+    iframe { flex: 1; border: none; width: 100%; height: 100%; background: #000; }
   </style>
 </head>
 <body>
@@ -174,51 +180,22 @@ def index_web_gui():
       <span class="badge-linux">Ubuntu 24.04 (4-Core AMD / 16GB)</span>
     </div>
     <div class="btn-bar">
-      <button class="btn" onclick="rfb.sendCtrlAltDel()">Ctrl+Alt+Del</button>
       <button class="btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
       <a class="btn" href="/tools" target="_blank">🛠️ MCP Tools</a>
       <a class="btn primary" href="/mcp" target="_blank">⚡ MCP Endpoint</a>
     </div>
   </header>
 
-  <div id="screen-container">
-    <div id="status-overlay">Connecting to interactive display...</div>
-  </div>
+  <iframe src="/novnc/vnc.html?path=websockify&autoconnect=true&resize=scale&reconnect=true"></iframe>
 
-  <script type="module">
-    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js';
-
-    const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsScheme}//${window.location.host}/websockify`;
-    const container = document.getElementById('screen-container');
-    const statusOverlay = document.getElementById('status-overlay');
-
-    window.rfb = new RFB(container, wsUrl, {
-      credentials: { password: '' },
-      wsProtocols: ['binary']
-    });
-
-    rfb.scaleViewport = true;
-    rfb.resizeSession = false;
-
-    rfb.addEventListener('connect', () => {
-      statusOverlay.style.display = 'none';
-      console.log('Connected to VNC Desktop!');
-    });
-
-    rfb.addEventListener('disconnect', (e) => {
-      statusOverlay.style.display = 'block';
-      statusOverlay.innerText = 'Disconnected from display. Reconnecting in 3s...';
-      setTimeout(() => location.reload(), 3000);
-    });
-
-    window.toggleFullscreen = function() {
+  <script>
+    function toggleFullscreen() {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen();
       } else {
         document.exitFullscreen();
       }
-    };
+    }
   </script>
 </body>
 </html>"""
@@ -421,7 +398,7 @@ async def handle_take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
     else:
         try:
             out_path = os.path.join(WORKSPACE_DIR, "desktop_screenshot.jpg")
-            res = subprocess.run(f"DISPLAY=:99 scrot -q 80 {out_path} 2>/dev/null || DISPLAY=:99 import -window root {out_path} 2>/dev/null", shell=True)
+            subprocess.run(f"DISPLAY=:99 scrot -q 80 {out_path} 2>/dev/null || DISPLAY=:99 import -window root {out_path} 2>/dev/null", shell=True)
             if os.path.exists(out_path):
                 with open(out_path, "rb") as f:
                     b64_img = base64.b64encode(f.read()).decode("utf-8")
@@ -797,7 +774,7 @@ async def mcp_rpc(req: JsonRpcRequest):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "3.0.0"}
+                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "3.1.0"}
             }
         }
     else:
