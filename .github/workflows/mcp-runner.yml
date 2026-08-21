@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser ssl-cert wget curl
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser openssl wget curl
 
       - name: Install High-Performance KasmVNC (WebP/H.264 60FPS Streaming)
         run: |
@@ -48,15 +48,15 @@ jobs:
           sudo apt-get install -y ./kasmvncserver_noble_1.5.0_amd64.deb
           rm kasmvncserver_noble_1.5.0_amd64.deb
 
-          # Setup snakeoil SSL certs
-          sudo make-ssl-cert generate-default-snakeoil --force-overwrite
-          sudo usermod -a -G ssl-cert runner
-
-          # Configure KasmVNC for the runner user non-interactively
+          # 1. Generate SSL certificates for KasmVNC directly in ~/.vnc
           mkdir -p ~/.vnc
           touch ~/.Xauthority
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /home/runner/.vnc/self.key -out /home/runner/.vnc/self.crt \
+            -subj "/C=US/ST=State/L=City/O=Org/CN=kasmvnc"
+          chmod 600 /home/runner/.vnc/self.key
           
-          # Setup xstartup for XFCE4 session
+          # 2. Setup xstartup for XFCE4 session
           cat << 'EOF' > ~/.vnc/xstartup
           #!/bin/sh
           unset SESSION_MANAGER
@@ -65,14 +65,16 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          # Setup password non-interactively for user runner (password: 123456)
+          # 3. Setup password non-interactively for user runner (password: 123456)
           echo -e "123456\n123456\n" | kasmvncpasswd -u runner -o -w
           
-          # Setup user kasmvnc config
+          # 4. Setup user kasmvnc config with custom cert paths
           cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
               require_ssl: false
+              pem_certificate: /home/runner/.vnc/self.crt
+              pem_key: /home/runner/.vnc/self.key
           desktop:
             resolution:
               width: 1920
@@ -80,8 +82,8 @@ jobs:
             allow_resize: true
           EOF
 
-          # Start KasmVNC Server on Display :1
-          vncserver :1 -select-de xfce -websocketPort 8443
+          # 5. Start KasmVNC Server on Display :1
+          vncserver :1 -select-de xfce -websocketPort 8443 -cert /home/runner/.vnc/self.crt -key /home/runner/.vnc/self.key
           echo "DISPLAY=:1" >> $GITHUB_ENV
 
       - name: Install Python MCP Dependencies
