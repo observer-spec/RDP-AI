@@ -68,6 +68,7 @@ jobs:
         env:
           AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
           WORKSPACE_DIR: ${{ github.workspace }}/workspace
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python server.py &
           sleep 3
@@ -86,52 +87,27 @@ jobs:
               echo "Tools Endpoint: $TUNNEL_URL/tools"
               echo "Persistent Workspace: $WORKSPACE_DIR"
               echo "==============================================================="
+              
+              # Automatically write to a repo file or variable so AI agent can read it instantly
+              curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/variables \
+                -d "{\"name\":\"MCP_TUNNEL_URL\",\"value\":\"$TUNNEL_URL\"}" 2>/dev/null || \
+              curl -s -X PATCH -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/variables/MCP_TUNNEL_URL \
+                -d "{\"name\":\"MCP_TUNNEL_URL\",\"value\":\"$TUNNEL_URL\"}" 2>/dev/null || true
+              
               break
             fi
             sleep 1
           done
           
           # Keep alive loop (runs for 5 hours max before clean handoff)
-          # Loops every 5 minutes and saves state timestamp
           for tick in {1..60}; do
             echo "Runner tick $tick: $(date)"
             sleep 300
           done
-
-      - name: Start MCP Server & Tunnel (Windows)
-        if: runner.os == 'Windows'
-        env:
-          AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
-          WORKSPACE_DIR: ${{ github.workspace }}/workspace
-        run: |
-          Start-Process python -ArgumentList "server.py"
-          Start-Sleep -Seconds 3
-          
-          $logPath = "$env:TEMP\tunnel.log"
-          Start-Process "cloudflared.exe" -ArgumentList "tunnel --url http://127.0.0.1:8000" -RedirectStandardError $logPath
-          
-          Write-Host "Waiting for Cloudflare Tunnel URL..."
-          for ($i = 0; $i -lt 30; $i++) {
-              if (Test-Path $logPath) {
-                  $content = Get-Content $logPath -Raw
-                  if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
-                      $url = $matches[0]
-                      Write-Host "==============================================================="
-                      Write-Host "MCP SERVER ONLINE!"
-                      Write-Host "URL: $url"
-                      Write-Host "MCP Endpoint: $url/mcp"
-                      Write-Host "Persistent Workspace: $env:WORKSPACE_DIR"
-                      Write-Host "==============================================================="
-                      break
-                  }
-              }
-              Start-Sleep -Seconds 1
-          }
-          
-          for ($tick = 1; $tick -le 60; $tick++) {
-              Write-Host "Runner tick $tick: $(Get-Date)"
-              Start-Sleep -Seconds 300
-          }
 
       - name: Save Persistent State & Workspace Cache
         if: always()
