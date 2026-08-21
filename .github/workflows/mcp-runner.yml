@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser wget curl
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser ssl-cert wget curl
 
       - name: Install High-Performance KasmVNC (WebP/H.264 60FPS Streaming)
         run: |
@@ -48,9 +48,13 @@ jobs:
           sudo apt-get install -y ./kasmvncserver_noble_1.5.0_amd64.deb
           rm kasmvncserver_noble_1.5.0_amd64.deb
 
+          # Setup snakeoil SSL certs
+          sudo make-ssl-cert generate-default-snakeoil --force-overwrite
+          sudo usermod -a -G ssl-cert runner
+
           # Configure KasmVNC for the runner user non-interactively
           mkdir -p ~/.vnc
-          sudo mkdir -p /etc/kasmvnc
+          touch ~/.Xauthority
           
           # Setup xstartup for XFCE4 session
           cat << 'EOF' > ~/.vnc/xstartup
@@ -64,8 +68,8 @@ jobs:
           # Setup password non-interactively for user runner (password: 123456)
           echo -e "123456\n123456\n" | kasmvncpasswd -u runner -o -w
           
-          # Setup global kasmvnc config
-          sudo tee /etc/kasmvnc/kasmvnc.yaml << 'EOF'
+          # Setup user kasmvnc config
+          cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
               require_ssl: false
