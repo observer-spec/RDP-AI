@@ -1,13 +1,10 @@
 """
-Persistent Super-Utility MCP Remote Server v2.1 for GitHub Actions Runners.
+Persistent Super-Utility MCP Remote Server v3.0 (Linux Edition with Web GUI Desktop)
 Includes:
-- Screen Capture (Xvfb virtual display screenshot + Playwright browser screenshot)
-- Computer / Browser GUI Control (navigate, click, type, JS, scroll)
-- Direct Python Code Evaluation & Shell Execution
-- File Management, Fast Search (grep), Direct URL Download & Zip Extract
-- Network Tools (HTTP Requests, curl, DNS check)
-- Process Manager (Inspect CPU/RAM & Kill)
-- Durable Memory & Workspace State Caching
+- Full Web-based Interactive Desktop GUI (noVNC embedded at base URL /)
+- WebSocket-to-TCP VNC Proxy on port 8000
+- 14+ MCP Tools (Playwright Browser, Shell, Python eval, File/Search, Memory, System)
+- Persistent Workspace State & GitHub Cache Sync
 """
 
 import os
@@ -21,8 +18,9 @@ import base64
 import urllib.request
 import re
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi import FastAPI, Header, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -33,7 +31,7 @@ HISTORY_FILE = os.path.join(WORKSPACE_DIR, "command_history.log")
 
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
-app = FastAPI(title="Persistent Super-Utility MCP Remote Server", version="2.1.0")
+app = FastAPI(title="Persistent Linux MCP Cloud Runner with Web Desktop", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,6 +92,137 @@ async def get_browser_page():
     
     return browser_page, None
 
+# --- Web Desktop WebSocket Proxy (noVNC <-> x11vnc on 5900) ---
+
+@app.websocket("/websockify")
+async def websocket_vnc_bridge(websocket: WebSocket):
+    await websocket.accept(subprotocols=["binary"])
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", 5900)
+    except Exception as e:
+        await websocket.close(code=1011, reason=f"VNC server connection failed: {str(e)}")
+        return
+
+    async def ws_to_tcp():
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                writer.write(data)
+                await writer.drain()
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except Exception:
+            pass
+        finally:
+            writer.close()
+
+    async def tcp_to_ws():
+        try:
+            while True:
+                data = await reader.read(8192)
+                if not data:
+                    break
+                await websocket.send_bytes(data)
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
+        except Exception:
+            pass
+        finally:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+    try:
+        await asyncio.gather(ws_to_tcp(), tcp_to_ws())
+    except Exception:
+        pass
+
+# --- Base URL Web Dashboard & Embedded noVNC GUI ---
+
+@app.get("/", response_class=HTMLResponse)
+def index_web_gui():
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>RDP-AI Cloud Linux Runner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js" type="module"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    header { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .title-group { display: flex; align-items: center; gap: 12px; }
+    .badge-online { background: #238636; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: bold; }
+    .badge-linux { background: #1f6feb; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 12px; }
+    .btn-bar { display: flex; gap: 8px; }
+    .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; text-decoration: none; transition: 0.2s; }
+    .btn:hover { background: #30363d; color: #fff; }
+    .btn.primary { background: #238636; border-color: #2ea043; color: #fff; }
+    .btn.primary:hover { background: #2ea043; }
+    #screen-container { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #noVNC_canvas { width: 100%; height: 100%; object-fit: contain; }
+    #status-overlay { position: absolute; color: #8b949e; font-size: 14px; pointer-events: none; background: rgba(13,17,23,0.85); padding: 12px 20px; border-radius: 8px; border: 1px solid #30363d; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-group">
+      <h2 style="font-size: 15px; color: #f0f6fc; font-weight: 600;">☁️ RDP-AI Linux Cloud VM</h2>
+      <span class="badge-online">ONLINE</span>
+      <span class="badge-linux">Ubuntu 24.04 (4-Core AMD / 16GB)</span>
+    </div>
+    <div class="btn-bar">
+      <button class="btn" onclick="rfb.sendCtrlAltDel()">Ctrl+Alt+Del</button>
+      <button class="btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+      <a class="btn" href="/tools" target="_blank">🛠️ MCP Tools</a>
+      <a class="btn primary" href="/mcp" target="_blank">⚡ MCP Endpoint</a>
+    </div>
+  </header>
+
+  <div id="screen-container">
+    <div id="status-overlay">Connecting to interactive display...</div>
+  </div>
+
+  <script type="module">
+    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js';
+
+    const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsScheme}//${window.location.host}/websockify`;
+    const container = document.getElementById('screen-container');
+    const statusOverlay = document.getElementById('status-overlay');
+
+    window.rfb = new RFB(container, wsUrl, {
+      credentials: { password: '' },
+      wsProtocols: ['binary']
+    });
+
+    rfb.scaleViewport = true;
+    rfb.resizeSession = false;
+
+    rfb.addEventListener('connect', () => {
+      statusOverlay.style.display = 'none';
+      console.log('Connected to VNC Desktop!');
+    });
+
+    rfb.addEventListener('disconnect', (e) => {
+      statusOverlay.style.display = 'block';
+      statusOverlay.innerText = 'Disconnected from display. Reconnecting in 3s...';
+      setTimeout(() => location.reload(), 3000);
+    });
+
+    window.toggleFullscreen = function() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
+    };
+  </script>
+</body>
+</html>"""
+
 # --- Tool Definitions ---
 
 TOOLS = [
@@ -103,7 +232,7 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "target": {"type": "string", "enum": ["browser", "desktop"], "default": "browser", "description": "Whether to capture active web page or X11 desktop display"},
+                "target": {"type": "string", "enum": ["browser", "desktop"], "default": "desktop", "description": "Whether to capture active web page or X11 desktop display"},
                 "full_page": {"type": "boolean", "default": False, "description": "If browser, capture full scrollable page"}
             }
         }
@@ -266,10 +395,10 @@ TOOLS = [
     }
 ]
 
-# --- Tool Implementations ---
+# --- Tool Handlers ---
 
 async def handle_take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
-    target = args.get("target", "browser")
+    target = args.get("target", "desktop")
     full_page = args.get("full_page", False)
     
     if target == "browser":
@@ -290,10 +419,9 @@ async def handle_take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             return {"error": f"Browser screenshot failed: {str(e)}"}
     else:
-        # Desktop / X11 display screenshot via scrot or import
         try:
             out_path = os.path.join(WORKSPACE_DIR, "desktop_screenshot.jpg")
-            res = subprocess.run(f"DISPLAY=:99 scrot -q 80 {out_path} 2>/dev/null || import -window root {out_path} 2>/dev/null", shell=True)
+            res = subprocess.run(f"DISPLAY=:99 scrot -q 80 {out_path} 2>/dev/null || DISPLAY=:99 import -window root {out_path} 2>/dev/null", shell=True)
             if os.path.exists(out_path):
                 with open(out_path, "rb") as f:
                     b64_img = base64.b64encode(f.read()).decode("utf-8")
@@ -304,7 +432,7 @@ async def handle_take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
                     "screenshot_base64": b64_img
                 }
             else:
-                return {"error": "No virtual X11 display active or scrot/import tool missing."}
+                return {"error": "No virtual X11 display active or scrot tool missing."}
         except Exception as e:
             return {"error": str(e)}
 
@@ -623,16 +751,6 @@ class JsonRpcRequest(BaseModel):
     method: str
     params: Optional[Dict[str, Any]] = None
 
-@app.get("/")
-def index():
-    return {
-        "status": "online",
-        "service": "Persistent Super-Utility MCP Remote Server",
-        "version": "2.1.0",
-        "tools_count": len(TOOLS),
-        "workspace": WORKSPACE_DIR
-    }
-
 @app.get("/tools", dependencies=[Depends(verify_token)])
 def list_tools():
     return {"tools": TOOLS}
@@ -679,7 +797,7 @@ async def mcp_rpc(req: JsonRpcRequest):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "2.1.0"}
+                "serverInfo": {"name": "persistent-super-utility-mcp-runner", "version": "3.0.0"}
             }
         }
     else:
