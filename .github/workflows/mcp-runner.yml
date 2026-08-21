@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   actions: write
+  issues: write
 
 jobs:
   run-mcp:
@@ -42,12 +43,12 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl libu2f-udev libvulkan1
 
-          # Install official Google Chrome (native deb without snap)
+          # Install official Google Chrome (native deb)
           wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
           rm google-chrome-stable_current_amd64.deb
 
-          # Configure Chrome as the default x-www-browser with --no-sandbox wrapper for root/runner
+          # Configure Chrome as the default x-www-browser with --no-sandbox wrapper
           sudo cp /usr/bin/google-chrome-stable /usr/bin/google-chrome-orig
           cat << 'EOF' | sudo tee /usr/bin/google-chrome-stable
           #!/bin/sh
@@ -63,7 +64,7 @@ jobs:
           sudo apt-get install -y ./kasmvncserver_noble_1.5.0_amd64.deb
           rm kasmvncserver_noble_1.5.0_amd64.deb
 
-          # 1. Generate SSL certificates for KasmVNC directly in ~/.vnc
+          # Generate SSL certs for KasmVNC
           mkdir -p ~/.vnc
           touch ~/.Xauthority
           openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -71,7 +72,7 @@ jobs:
             -subj "/C=US/ST=State/L=City/O=Org/CN=kasmvnc"
           chmod 600 /home/runner/.vnc/self.key
           
-          # 2. Setup xstartup for XFCE4 session
+          # Setup xstartup
           cat << 'EOF' > ~/.vnc/xstartup
           #!/bin/sh
           unset SESSION_MANAGER
@@ -80,10 +81,10 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          # 3. Setup password non-interactively for user runner (password: 123456)
+          # Setup password (runner / 123456)
           echo -e "123456\n123456\n" | kasmvncpasswd -u runner -o -w
           
-          # 4. Setup user kasmvnc config
+          # Setup config
           cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
@@ -97,7 +98,7 @@ jobs:
             allow_resize: true
           EOF
 
-          # 5. Start KasmVNC Server on Display :1
+          # Start KasmVNC Server on Display :1
           vncserver :1 -select-de xfce -websocketPort 8443 -cert /home/runner/.vnc/self.crt -key /home/runner/.vnc/self.key
           echo "DISPLAY=:1" >> $GITHUB_ENV
 
@@ -117,12 +118,12 @@ jobs:
         env:
           AUTH_TOKEN: ${{ github.event.inputs.auth_token }}
           WORKSPACE_DIR: ${{ github.workspace }}/workspace
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Start MCP API server on background port 8000
           python server.py &
           sleep 3
           
-          # Start Cloudflare Tunnel forwarding directly to KasmVNC Web UI (port 8443)
+          # Start Cloudflare Tunnel
           cloudflared tunnel --url http://127.0.0.1:8443 2>&1 | tee tunnel.log &
           
           echo "Waiting for tunnel to initialize..."
@@ -136,6 +137,14 @@ jobs:
               echo "⚡ MCP Server Endpoint: http://127.0.0.1:8000/mcp"
               echo "📁 Persistent Workspace: $WORKSPACE_DIR"
               echo "==============================================================="
+              
+              # Post live link into GitHub Job Summary so it shows on the UI summary page directly!
+              echo "# ⚡ Live Cloud Desktop & MCP Server" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "- **Web Desktop URL:** [$TUNNEL_URL]($TUNNEL_URL)" >> $GITHUB_STEP_SUMMARY
+              echo "- **Login Username:** \`runner\`" >> $GITHUB_STEP_SUMMARY
+              echo "- **Login Password:** \`123456\`" >> $GITHUB_STEP_SUMMARY
+              echo "- **MCP Endpoint:** \`$TUNNEL_URL/mcp\`" >> $GITHUB_STEP_SUMMARY
               break
             fi
             sleep 1
