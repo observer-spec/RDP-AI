@@ -36,11 +36,11 @@ jobs:
         run: |
           mkdir -p workspace
 
-      - name: Install Desktop GUI & Pre-installed Web Browsers (Firefox & Chromium)
+      - name: Install Desktop GUI & Chromium Web Browser
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot firefox-esr wget curl
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot chromium-browser wget curl
 
       - name: Install High-Performance KasmVNC (WebP/H.264 60FPS Streaming)
         run: |
@@ -60,7 +60,7 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          # Setup KasmVNC config (Disable auth, allow direct browser access)
+          # Setup KasmVNC config
           cat << 'EOF' > ~/.vnc/kasmvnc.yaml
           network:
             ssl:
