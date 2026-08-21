@@ -48,8 +48,9 @@ jobs:
           sudo apt-get install -y ./kasmvncserver_noble_1.5.0_amd64.deb
           rm kasmvncserver_noble_1.5.0_amd64.deb
 
-          # Configure KasmVNC for the runner user
+          # Configure KasmVNC for the runner user non-interactively
           mkdir -p ~/.vnc
+          sudo mkdir -p /etc/kasmvnc
           
           # Setup xstartup for XFCE4 session
           cat << 'EOF' > ~/.vnc/xstartup
@@ -60,8 +61,11 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          # Setup KasmVNC 1.5 config
-          cat << 'EOF' > ~/.vnc/kasmvnc.yaml
+          # Setup password non-interactively for user runner (password: 123456)
+          echo -e "123456\n123456\n" | kasmvncpasswd -u runner -o -w
+          
+          # Setup global kasmvnc config
+          sudo tee /etc/kasmvnc/kasmvnc.yaml << 'EOF'
           network:
             ssl:
               require_ssl: false
@@ -72,8 +76,8 @@ jobs:
             allow_resize: true
           EOF
 
-          # Start KasmVNC Server on Display :1 (Web GUI on port 8444)
-          vncserver :1 -select-de xfce -disable-auth -websocketPort 8443
+          # Start KasmVNC Server on Display :1
+          vncserver :1 -select-de xfce -websocketPort 8443
           echo "DISPLAY=:1" >> $GITHUB_ENV
 
       - name: Install Python MCP Dependencies
@@ -107,6 +111,7 @@ jobs:
               echo "==============================================================="
               echo "⚡ KASMVNC 60FPS WEB DESKTOP IS ONLINE!"
               echo "🔗 Smooth Web Desktop URL: $TUNNEL_URL"
+              echo "⚡ Login User: runner | Password: 123456"
               echo "⚡ MCP Server Endpoint: http://127.0.0.1:8000/mcp"
               echo "📁 Persistent Workspace: $WORKSPACE_DIR"
               echo "==============================================================="
