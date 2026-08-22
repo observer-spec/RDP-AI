@@ -5,14 +5,17 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl ca-certificates \
-    libu2f-udev libvulkan1 python3 python3-pip supervisor tini \
-    && rm -rf /var/lib/apt/lists/*
-
-# --- Google Chrome ---
+# Fetch third-party debs first so a single apt run can resolve ALL dependencies.
 ADD https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb /tmp/chrome.deb
-RUN apt-get install -y /tmp/chrome.deb && rm /tmp/chrome.deb
+ADD https://github.com/kasmtech/KasmVNC/releases/download/v1.5.0/kasmvncserver_noble_1.5.0_amd64.deb /tmp/kasmvnc.deb
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl ca-certificates \
+        libu2f-udev libvulkan1 python3 python3-pip supervisor tini \
+    && apt-get install -y /tmp/chrome.deb /tmp/kasmvnc.deb \
+    && rm -f /tmp/chrome.deb /tmp/kasmvnc.deb \
+    && rm -rf /var/lib/apt/lists/*
 
 # Chrome wrapper: container-safe flags, GPU enabled via SwiftShader (no --disable-gpu)
 RUN printf '#!/bin/sh\nexec /usr/bin/google-chrome-stable --no-sandbox --disable-dev-shm-usage \\\n  --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \\\n  --password-store=basic --no-first-run "$@"\n' > /usr/local/bin/google-chrome-runner \
@@ -23,10 +26,6 @@ RUN update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/loca
     && update-alternatives --set x-www-browser /usr/local/bin/google-chrome-runner \
     && update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/google-chrome-runner 300 \
     && update-alternatives --set gnome-www-browser /usr/local/bin/google-chrome-runner
-
-# --- KasmVNC ---
-ADD https://github.com/kasmtech/KasmVNC/releases/download/v1.5.0/kasmvncserver_noble_1.5.0_amd64.deb /tmp/kasmvnc.deb
-RUN apt-get install -y /tmp/kasmvnc.deb && rm /tmp/kasmvnc.deb
 
 # --- Non-root desktop user ---
 RUN userdel -r ubuntu 2>/dev/null; useradd -m -s /bin/bash runner && echo "runner:changeme" | chpasswd
