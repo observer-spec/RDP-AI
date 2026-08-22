@@ -12,16 +12,15 @@ headers = {
     "Accept": "application/vnd.github+json"
 }
 
-def trigger_workflow(runner_os="ubuntu-latest", auth_token="mcp-secret-key-123"):
+def trigger_workflow(auth_token="mcp-secret-key-123"):
     if not GITHUB_TOKEN:
         print("[-] Please set OBSERVER_GITHUB_TOKEN environment variable.")
         return
-    print(f"[*] Triggering GitHub Actions workflow on {REPO} ({runner_os})...")
+    print(f"[*] Triggering GitHub Actions workflow on {REPO}...")
     url = f"https://api.github.com/repos/{REPO}/actions/workflows/{WORKFLOW_FILE}/dispatches"
     payload = {
         "ref": "main",
         "inputs": {
-            "runner_os": runner_os,
             "auth_token": auth_token
         }
     }

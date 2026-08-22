@@ -48,6 +48,11 @@ def verify_token(authorization: Optional[str] = Header(None)):
             raise HTTPException(status_code=401, detail="Unauthorized")
     return True
 
+@app.get("/health")
+def health():
+    """Unauthenticated liveness probe for workflow health checks."""
+    return {"status": "ok"}
+
 # --- Memory & History Helpers ---
 
 def load_memory() -> Dict[str, Any]:
