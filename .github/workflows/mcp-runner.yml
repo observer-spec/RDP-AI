@@ -239,6 +239,17 @@ jobs:
           - **Browser:** Google Chrome (shortcut on desktop)
           SUMMARY
 
+          # Keep alive loop (runs for ~5 hours before clean handoff)
+          for tick in {1..60}; do
+            echo "Runner tick $tick: $(date)"
+            # Bail out early if either tunnel dies
+            if ! kill -0 $(pgrep -f 'cloudflared tunnel' | head -1) 2>/dev/null; then
+              echo "::error::Tunnel process died — ending run"
+              exit 1
+            fi
+            sleep 300
+          done
+
       - name: Save Persistent State & Workspace Cache
         if: always()
         uses: actions/cache/save@v4
