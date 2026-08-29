@@ -1,0 +1,375 @@
+name: Cloudflare MCP Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_prebaked_image:
+        description: 'Boot from prebaked ghcr.io image (fast) instead of installing live'
+        required: false
+        default: 'true'
+        type: boolean
+      auth_token:
+        description: 'Fallback MCP token — used ONLY if MCP_TOKEN secret is unset'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 */5 * * *' # watchdog: respawn if runner died (every 5h)
+  workflow_run:
+    workflows: ["Build Prebaked Desktop Image"]
+    types: [completed]
+
+# Only one desktop at a time — a new dispatch kills any zombie run automatically
+concurrency:
+  group: rdp-runner
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+  packages: write
+
+jobs:
+  run-mcp:
+    runs-on: ubuntu-latest
+    env:
+      # Auth comes from repo Secrets (Settings -> Secrets and variables -> Actions).
+      # Falls back to the workflow input only if the secret is unset.
+      AUTH_TOKEN: ${{ secrets.MCP_TOKEN || github.event.inputs.auth_token }}
+      VNC_USER: runner
+      VNC_PASS: ${{ secrets.VNC_PASSWORD }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Required Secrets
+        run: |
+          if [ -z "$AUTH_TOKEN" ]; then
+            echo "::error::No MCP auth token. Set the MCP_TOKEN secret (Settings -> Secrets and variables -> Actions), or pass the auth_token input."
+            exit 1
+          fi
+          if [ -z "$VNC_PASS" ]; then
+            echo "::error::No VNC password. Set the VNC_PASSWORD secret (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore Workspace from Git Branch (survives cache eviction)
+        continue-on-error: true
+        run: |
+          git fetch origin workspace-data:workspace-data 2>/dev/null || echo "no workspace-data branch yet"
+          if git show-ref --verify --quiet refs/remotes/origin/workspace-data; then
+            echo "Restoring workspace from git branch..."
+            git checkout workspace-data -- workspace 2>/dev/null || git show origin/workspace-data:workspace 2>/dev/null | tar -x 2>/dev/null || true
+            # alternative: checkout files directly
+            git archive origin/workspace-data workspace 2>/dev/null | tar -x 2>/dev/null || true
+            ls -la workspace 2>&1 | head -n 20
+          fi
+
+      - name: Restore Persistent State & Workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace
+          key: mcp-workspace-v1-${{ github.run_number }}
+          restore-keys: |
+            mcp-workspace-v1-
+
+      - name: Initialize Workspace Directory
+        run: |
+          mkdir -p workspace
+
+      - name: Install Desktop GUI, Chrome & KasmVNC (prebaked image)
+        if: ${{ inputs.use_prebaked_image }}
+        timeout-minutes: 5
+        run: |
+          echo "Pulling prebuilt desktop image from ghcr.io..."
+          docker pull ghcr.io/observer-spec/rdp-ai:latest || {
+            echo "::warning::Prebaked image unavailable — falling back to live install"
+            exit 1
+          }
+
+          # Run the full desktop stack inside the container.
+          docker run -d --name desktop \
+            --shm-size=2g \
+            -e VNC_USER="$VNC_USER" \
+            -e VNC_PASS="$VNC_PASS" \
+            -e DISPLAY=:1 \
+            -v "$PWD/workspace:/workspace" \
+            --network host \
+            ghcr.io/observer-spec/rdp-ai:latest
+
+          # Wait for KasmVNC websocket port inside container
+          for i in {1..30}; do
+            if curl -sk -o /dev/null http://127.0.0.1:8443; then
+              echo "KasmVNC is up."
+              break
+            fi
+            sleep 2
+          done
+          curl -sk -o /dev/null http://127.0.0.1:8443 || {
+            echo "::error::KasmVNC never came up inside container"; exit 1;
+          }
+          echo "DISPLAY=:1" >> "$GITHUB_ENV"
+
+      - name: Install Desktop GUI & Google Chrome (live fallback)
+        if: ${{ !inputs.use_prebaked_image || failure() }}
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl libu2f-udev libvulkan1
+
+          # 1. Install Google Chrome (Official Deb)
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+          rm google-chrome-stable_current_amd64.deb
+
+          # 2. Wrapper for Chrome in containers. GPU stays ENABLED via SwiftShader
+          #    software rendering (no --disable-gpu), so video/WebGL still hit 60fps.
+          sudo tee /usr/local/bin/google-chrome-runner << 'EOF' > /dev/null
+          #!/bin/sh
+          exec /usr/bin/google-chrome-stable --no-sandbox --disable-dev-shm-usage \
+            --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+            --password-store=basic --no-first-run "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/google-chrome-runner
+
+          # 3. Desktop shortcut + default browser registration
+          mkdir -p /home/runner/Desktop /home/runner/.config/xfce4
+          cat << 'EOF' > /home/runner/Desktop/Google-Chrome.desktop
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=Google Chrome
+          Comment=Access the Internet
+          Exec=/usr/local/bin/google-chrome-runner %U
+          Icon=google-chrome
+          Path=/home/runner
+          Terminal=false
+          StartupNotify=true
+          Categories=Network;WebBrowser;
+          EOF
+          chmod +x /home/runner/Desktop/Google-Chrome.desktop
+
+          sudo update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/local/bin/google-chrome-runner 300
+          sudo update-alternatives --set x-www-browser /usr/local/bin/google-chrome-runner
+          sudo update-alternatives --install /usr/bin/gnome-www-browser gnome-www-browser /usr/local/bin/google-chrome-runner 300
+          sudo update-alternatives --set gnome-www-browser /usr/local/bin/google-chrome-runner
+
+      - name: Install High-Performance KasmVNC (live fallback)
+        if: ${{ !inputs.use_prebaked_image || failure() }}
+        run: |
+          wget -q https://github.com/kasmtech/KasmVNC/releases/download/v1.5.0/kasmvncserver_noble_1.5.0_amd64.deb
+          sudo apt-get install -y ./kasmvncserver_noble_1.5.0_amd64.deb
+          rm kasmvncserver_noble_1.5.0_amd64.deb
+
+          mkdir -p ~/.vnc
+          touch ~/.Xauthority
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /home/runner/.vnc/self.key -out /home/runner/.vnc/self.crt \
+            -subj "/C=US/ST=State/L=City/O=Org/CN=kasmvnc"
+          chmod 600 /home/runner/.vnc/self.key
+
+          cat << 'EOF' > ~/.vnc/xstartup
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          dbus-launch --exit-with-session startxfce4 &
+          EOF
+          chmod +x ~/.vnc/xstartup
+
+          echo -e "$VNC_PASS\n$VNC_PASS\n" | kasmvncpasswd -u "$VNC_USER" -o -w
+
+          cat << 'EOF' > ~/.vnc/kasmvnc.yaml
+          network:
+            ssl:
+              require_ssl: false
+              pem_certificate: /home/runner/.vnc/self.crt
+              pem_key: /home/runner/.vnc/self.key
+          desktop:
+            resolution:
+              width: 1920
+              height: 1080
+            allow_resize: true
+          EOF
+
+          vncserver :1 -select-de xfce -websocketPort 8443 -cert /home/runner/.vnc/self.crt -key /home/runner/.vnc/self.key
+          echo "DISPLAY=:1" >> "$GITHUB_ENV"
+
+      - name: Install Python MCP Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn pydantic requests playwright psutil
+          python -m playwright install chromium
+
+      - name: Install Cloudflare Tunnel
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
+          rm cloudflared-linux-amd64.deb
+
+      - name: Start MCP Server & Cloudflare Tunnels
+        env:
+          WORKSPACE_DIR: ${{ github.workspace }}/workspace
+        run: |
+          python server.py &
+          sleep 2
+
+          cloudflared tunnel --url http://127.0.0.1:8443 2>&1 | tee tunnel.log &
+          cloudflared tunnel --url http://127.0.0.1:8000 2>&1 | tee tunnel-mcp.log &
+
+          # --- Health check: desktop tunnel URL must appear ---
+          TUNNEL_URL=""
+          for i in {1..45}; do
+            TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -n 1 || true)
+            [ -n "$TUNNEL_URL" ] && break
+            sleep 2
+          done
+          [ -n "$TUNNEL_URL" ] || { echo "::error::Desktop tunnel never got a URL"; exit 1; }
+
+          # --- Health check: MCP tunnel URL must appear ---
+          MCP_TUNNEL_URL=""
+          for i in {1..45}; do
+            MCP_TUNNEL_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel-mcp.log | head -n 1 || true)
+            [ -n "$MCP_TUNNEL_URL" ] && break
+            sleep 2
+          done
+          [ -n "$MCP_TUNNEL_URL" ] || { echo "::error::MCP tunnel never got a URL"; exit 1; }
+
+          # --- Health check: MCP server must answer ---
+          MCP_OK=""
+          for i in {1..15}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health || true)
+            [ "$HTTP_CODE" = "200" ] && MCP_OK=yes && break
+            sleep 2
+          done
+          [ -n "$MCP_OK" ] || { echo "::error::MCP server failed /health on :8000"; exit 1; }
+
+          # Export for later steps + artifact (retrievable while the run is alive)
+          {
+            echo "DESKTOP_URL=$TUNNEL_URL"
+            echo "MCP_URL=$MCP_TUNNEL_URL"
+            printf '%s\n' "$TUNNEL_URL" "$MCP_TUNNEL_URL" > tunnel-urls.txt
+          } >> "$GITHUB_ENV"
+
+          # Never print credentials — public repo, public Actions log.
+          echo "==============================================================="
+          echo "⚡ WEB DESKTOP ONLINE"
+          echo "🔗 Desktop URL: $TUNNEL_URL"
+          echo "🛠 MCP URL: $MCP_TUNNEL_URL/mcp"
+          echo "🔐 Credentials: from repository secrets (never shown here)"
+          echo "📁 Persistent Workspace: $WORKSPACE_DIR"
+          echo "==============================================================="
+
+          cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
+          # ⚡ Live Cloud Desktop & MCP Server
+
+          - **Web Desktop URL:** [$TUNNEL_URL]($TUNNEL_URL)
+          - **MCP URL:** [$MCP_TUNNEL_URL]($MCP_TUNNEL_URL)/mcp
+          - **Login:** user + password come from repo secrets (\`VNC_USER\` / \`VNC_PASSWORD\`)
+          - **Browser:** Google Chrome (shortcut on desktop)
+          SUMMARY
+
+      - name: Publish Tunnel URLs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-urls
+          path: tunnel-urls.txt
+
+      - name: Keep Alive (~5h40m) + Auto-Heal + Auto-Respawn
+        timeout-minutes: 340
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # What #3 does: instead of dying when cloudflared crashes, it RESTARTS it.
+          # Old code: if tunnel died → exit 1 → whole runner dead.
+          # New code: if tunnel died → relaunch cloudflared + re-grep URL → keep running.
+          # Plus at tick 55 (~4.5h) it dispatches a FRESH run via GH API so uptime chains forever.
+          heal_tunnel() {
+            local url_port=$1
+            local log_file=$2
+            if ! pgrep -f "cloudflared tunnel.*$url_port" > /dev/null 2>&1; then
+              echo "⚠️ Tunnel :$url_port died, healing..."
+              pkill -f "cloudflared tunnel.*$url_port" 2>/dev/null || true
+              cloudflared tunnel --url http://127.0.0.1:$url_port 2>&1 | tee -a "$log_file" &
+              sleep 5
+              NEW_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$log_file" | tail -n 1 || true)
+              [ -n "$NEW_URL" ] && echo "✓ Healed :$url_port → $NEW_URL"
+            fi
+          }
+          for tick in {1..68}; do
+            echo "Runner tick $tick/68: $(date) — uptime $((tick*5))min"
+            heal_tunnel 8443 tunnel.log
+            heal_tunnel 8000 tunnel-mcp.log
+            # MCP health
+            if ! curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "⚠️ MCP /health failed, restarting server..."
+              pkill -f "server.py" 2>/dev/null || true
+              WORKSPACE_DIR="$PWD/workspace" python server.py &
+              sleep 3
+            fi
+            # Auto-respawn at 4.5h (tick 54) for infinite chain
+            if [ "$tick" -eq 54 ]; then
+              echo "🔄 Chaining next runner for infinite uptime..."
+              gh workflow run mcp-runner.yml --ref main -f use_prebaked_image=true 2>&1 || \
+              curl -s -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/mcp-runner.yml/dispatches \
+                -d '{"ref":"main","inputs":{"use_prebaked_image":"true"}}' 2>&1 | head
+              echo "✓ Next runner dispatched, this one will finish gracefully in ~50min"
+            fi
+            sleep 300
+          done
+
+      - name: Push Workspace to Git Branch (infinite persistence)
+        if: always()
+        run: |
+          if [ -d workspace ] && [ "$(ls -A workspace 2>/dev/null)" ]; then
+            git config user.name "rdp-bot"
+            git config user.email "bot@rdp.local"
+            git fetch origin workspace-data 2>/dev/null || true
+            # create or update orphan branch
+            if git show-ref --verify --quiet refs/remotes/origin/workspace-data; then
+              git checkout workspace-data 2>/dev/null || git checkout -b workspace-data origin/workspace-data
+            else
+              git checkout --orphan workspace-data 2>/dev/null || git checkout -b workspace-data
+            fi
+            mkdir -p workspace
+            git add workspace -f
+            git diff --cached --quiet || git commit -m "workspace snapshot $(date -u +%Y-%m-%dT%H:%MZ) run ${{ github.run_number }}" || true
+            git push -f origin workspace-data 2>&1 | tail -n 5
+            git checkout main 2>/dev/null || git checkout -
+          else
+            echo "workspace empty, skipping git push"
+          fi
+
+      - name: Save Persistent State & Workspace Cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace
+          key: mcp-workspace-v1-${{ github.run_number }}
+
+      - name: Prune old workspace caches (rolling window of 5)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install requests -q
+          python - << 'PYEOF'
+          import os, requests
+          token = os.environ["GH_TOKEN"]
+          headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+          base = "https://api.github.com/repos/observer-spec/RDP-AI/actions/caches"
+          r = requests.get(base, headers=headers, timeout=20)
+          caches = r.json().get("actions_caches", [])
+          # newest first by created_at
+          caches.sort(key=lambda c: c.get("created_at", ""), reverse=True)
+          for c in caches[5:]:
+              cid = c.get("id")
+              if cid:
+                  d = requests.delete(f"{base}?cache_id={cid}", headers=headers, timeout=20)
+                  print(f"pruned cache {cid}: {d.status_code}")
+          PYEOF
