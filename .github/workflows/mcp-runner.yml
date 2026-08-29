@@ -12,6 +12,11 @@ on:
         description: 'Fallback MCP token — used ONLY if MCP_TOKEN secret is unset'
         required: false
         default: ''
+  schedule:
+    - cron: '0 */5 * * *' # watchdog: respawn if runner died (every 5h)
+  workflow_run:
+    workflows: ["Build Prebaked Desktop Image"]
+    types: [completed]
 
 # Only one desktop at a time — a new dispatch kills any zombie run automatically
 concurrency:
@@ -51,6 +56,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Restore Workspace from Git Branch (survives cache eviction)
+        continue-on-error: true
+        run: |
+          git fetch origin workspace-data:workspace-data 2>/dev/null || echo "no workspace-data branch yet"
+          if git show-ref --verify --quiet refs/remotes/origin/workspace-data; then
+            echo "Restoring workspace from git branch..."
+            git checkout workspace-data -- workspace 2>/dev/null || git show origin/workspace-data:workspace 2>/dev/null | tar -x 2>/dev/null || true
+            # alternative: checkout files directly
+            git archive origin/workspace-data workspace 2>/dev/null | tar -x 2>/dev/null || true
+            ls -la workspace 2>&1 | head -n 20
+          fi
 
       - name: Restore Persistent State & Workspace
         uses: actions/cache/restore@v4
@@ -262,19 +279,71 @@ jobs:
           name: tunnel-urls
           path: tunnel-urls.txt
 
-      - name: Keep Alive (~5h)
-        timeout-minutes: 315
+      - name: Keep Alive (~5h40m) + Auto-Heal + Auto-Respawn
+        timeout-minutes: 340
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Keep alive loop (runs for ~5 hours before clean handoff)
-          for tick in {1..60}; do
-            echo "Runner tick $tick: $(date)"
-            # Bail out early if either tunnel dies
-            if ! pgrep -f 'cloudflared tunnel' > /dev/null 2>&1; then
-              echo "::error::Tunnel process died — ending run"
-              exit 1
+          # What #3 does: instead of dying when cloudflared crashes, it RESTARTS it.
+          # Old code: if tunnel died → exit 1 → whole runner dead.
+          # New code: if tunnel died → relaunch cloudflared + re-grep URL → keep running.
+          # Plus at tick 55 (~4.5h) it dispatches a FRESH run via GH API so uptime chains forever.
+          heal_tunnel() {
+            local url_port=$1
+            local log_file=$2
+            if ! pgrep -f "cloudflared tunnel.*$url_port" > /dev/null 2>&1; then
+              echo "⚠️ Tunnel :$url_port died, healing..."
+              pkill -f "cloudflared tunnel.*$url_port" 2>/dev/null || true
+              cloudflared tunnel --url http://127.0.0.1:$url_port 2>&1 | tee -a "$log_file" &
+              sleep 5
+              NEW_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$log_file" | tail -n 1 || true)
+              [ -n "$NEW_URL" ] && echo "✓ Healed :$url_port → $NEW_URL"
+            fi
+          }
+          for tick in {1..68}; do
+            echo "Runner tick $tick/68: $(date) — uptime $((tick*5))min"
+            heal_tunnel 8443 tunnel.log
+            heal_tunnel 8000 tunnel-mcp.log
+            # MCP health
+            if ! curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "⚠️ MCP /health failed, restarting server..."
+              pkill -f "server.py" 2>/dev/null || true
+              WORKSPACE_DIR="$PWD/workspace" python server.py &
+              sleep 3
+            fi
+            # Auto-respawn at 4.5h (tick 54) for infinite chain
+            if [ "$tick" -eq 54 ]; then
+              echo "🔄 Chaining next runner for infinite uptime..."
+              gh workflow run mcp-runner.yml --ref main -f use_prebaked_image=true 2>&1 || \
+              curl -s -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/mcp-runner.yml/dispatches \
+                -d '{"ref":"main","inputs":{"use_prebaked_image":"true"}}' 2>&1 | head
+              echo "✓ Next runner dispatched, this one will finish gracefully in ~50min"
             fi
             sleep 300
           done
+
+      - name: Push Workspace to Git Branch (infinite persistence)
+        if: always()
+        run: |
+          if [ -d workspace ] && [ "$(ls -A workspace 2>/dev/null)" ]; then
+            git config user.name "rdp-bot"
+            git config user.email "bot@rdp.local"
+            git fetch origin workspace-data 2>/dev/null || true
+            # create or update orphan branch
+            if git show-ref --verify --quiet refs/remotes/origin/workspace-data; then
+              git checkout workspace-data 2>/dev/null || git checkout -b workspace-data origin/workspace-data
+            else
+              git checkout --orphan workspace-data 2>/dev/null || git checkout -b workspace-data
+            fi
+            mkdir -p workspace
+            git add workspace -f
+            git diff --cached --quiet || git commit -m "workspace snapshot $(date -u +%Y-%m-%dT%H:%MZ) run ${{ github.run_number }}" || true
+            git push -f origin workspace-data 2>&1 | tail -n 5
+            git checkout main 2>/dev/null || git checkout -
+          else
+            echo "workspace empty, skipping git push"
+          fi
 
       - name: Save Persistent State & Workspace Cache
         if: always()
