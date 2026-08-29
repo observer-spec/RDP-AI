@@ -320,6 +320,20 @@ TOOLS = [
             "type": "object",
             "properties": {}
         }
+    },
+    {
+        "name": "tmux_session",
+        "description": "Persistent tmux sessions — create, send keys, capture output, list/kill. Survives between calls unlike execute_command.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "list", "send", "capture", "kill"], "description": "create=new session, list=sessions, send=keys to session, capture=pane output, kill=terminate"},
+                "session": {"type": "string", "description": "tmux session name (e.g. dev, bot)"},
+                "command": {"type": "string", "description": "command/keys to send (for create/send)"},
+                "lines": {"type": "integer", "description": "lines to capture (default 100)", "default": 100}
+            },
+            "required": ["action"]
+        }
     }
 ]
 
@@ -650,6 +664,44 @@ async def handle_system_info(args: Dict[str, Any]) -> Dict[str, Any]:
         "github_runner_os": os.getenv("RUNNER_OS")
     }
 
+async def handle_tmux_session(args: Dict[str, Any]) -> Dict[str, Any]:
+    action = args.get("action", "list")
+    session = args.get("session", "main")
+    command = args.get("command", "")
+    lines = args.get("lines", 100)
+    import shutil
+    if not shutil.which("tmux"):
+        # try install
+        subprocess.run("sudo apt-get update -qq && sudo apt-get install -y tmux 2>&1 | tail -n 5", shell=True, timeout=60)
+    def run(cmd):
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+        return r.stdout.strip(), r.stderr.strip(), r.returncode
+    if action == "list":
+        out, err, code = run("tmux list-sessions -F '#{session_name} #{session_created} #{pane_current_command}' 2>&1 || echo 'no sessions'")
+        sessions = [] if "no sessions" in out else out.splitlines()
+        return {"sessions": sessions, "raw": out, "stderr": err}
+    elif action == "create":
+        out, err, code = run(f"tmux has-session -t {session} 2>&1 && echo exists || tmux new-session -d -s {session} 2>&1")
+        if command:
+            run(f"tmux send-keys -t {session} '{command}' Enter")
+        out2, _, _ = run(f"tmux list-sessions 2>&1 | head")
+        return {"action": "create", "session": session, "output": out, "sessions": out2}
+    elif action == "send":
+        if not command:
+            return {"error": "command required for send"}
+        out, err, code = run(f"tmux send-keys -t {session} '{command}' Enter; echo ok")
+        return {"action": "send", "session": session, "command": command, "result": out, "stderr": err}
+    elif action == "capture":
+        out, err, code = run(f"tmux capture-pane -p -t {session} -S -{lines} 2>&1 | tail -n {lines}")
+        if code != 0:
+            return {"error": err or out, "session": session}
+        return {"session": session, "output": out, "lines": len(out.splitlines())}
+    elif action == "kill":
+        out, err, code = run(f"tmux kill-session -t {session} 2>&1; echo killed:{code}")
+        return {"action": "kill", "session": session, "result": out}
+    else:
+        return {"error": f"unknown action {action}"}
+
 HANDLERS = {
     "take_screenshot": handle_take_screenshot,
     "browser_open": handle_browser_open,
@@ -664,7 +716,8 @@ HANDLERS = {
     "memory_store": handle_memory_store,
     "memory_recall": handle_memory_recall,
     "process_manager": handle_process_manager,
-    "system_info": handle_system_info
+    "system_info": handle_system_info,
+    "tmux_session": handle_tmux_session
 }
 
 # --- API Endpoints ---

@@ -81,6 +81,35 @@ jobs:
         run: |
           mkdir -p workspace
 
+      - name: Setup R2 Sync & Restore (optional, needs R2 secrets)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ] || [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+            echo "R2 secrets not set — skipping R2 restore (using git branch + cache only)"
+            exit 0
+          fi
+          R2_BUCKET="${R2_BUCKET:-rdp-ai-workspace}"
+          # install rclone if missing (prebaked image already has it)
+          command -v rclone >/dev/null 2>&1 || { curl -s https://rclone.org/install.sh | sudo bash; }
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<CONF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = $R2_ACCESS_KEY_ID
+          secret_access_key = $R2_SECRET_ACCESS_KEY
+          endpoint = https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com
+          region = auto
+          CONF
+          echo "Restoring workspace from R2 s3://$R2_BUCKET/workspace ..."
+          rclone copy r2:$R2_BUCKET/workspace workspace --transfers 4 --checkers 4 --stats-one-line 2>&1 | tail -n 20 || echo "R2 restore: no existing data or empty bucket"
+          ls -lh workspace 2>&1 | head -n 20
+          echo "R2 restore done"
+
       - name: Install Desktop GUI, Chrome & KasmVNC (prebaked image)
         if: ${{ inputs.use_prebaked_image }}
         timeout-minutes: 5
@@ -204,6 +233,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install fastapi uvicorn pydantic requests playwright psutil
           python -m playwright install chromium
+          sudo apt-get update -qq && sudo apt-get install -y tmux rclone 2>&1 | tail -n 5 || true
 
       - name: Install Cloudflare Tunnel
         run: |
@@ -319,6 +349,10 @@ jobs:
         timeout-minutes: 340
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           # What #3 does: instead of dying when cloudflared crashes, it RESTARTS it.
           # Old code: if tunnel died → exit 1 → whole runner dead.
@@ -340,6 +374,11 @@ jobs:
             echo "Runner tick $tick/68: $(date) — uptime $((tick*5))min"
             heal_tunnel 8443 tunnel.log
             heal_tunnel 8000 tunnel-mcp.log
+            # R2 periodic sync every 30min (tick % 6 == 0)
+            if [ $((tick % 6)) -eq 0 ] && [ -n "$R2_ACCOUNT_ID" ]; then
+              echo "📦 R2 sync tick $tick..."
+              rclone sync workspace r2:${R2_BUCKET:-rdp-ai-workspace}/workspace --transfers 4 --stats-one-line 2>&1 | tail -n 5 || true
+            fi
             # MCP health
             if ! curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
               echo "⚠️ MCP /health failed, restarting server..."
@@ -358,6 +397,23 @@ jobs:
             fi
             sleep 300
           done
+
+      - name: Sync Workspace to R2 (infinite persistence, always)
+        if: always()
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ] || [ -z "$R2_ACCESS_KEY_ID" ]; then
+            echo "R2 not configured — skipping R2 sync"
+            exit 0
+          fi
+          R2_BUCKET="${R2_BUCKET:-rdp-ai-workspace}"
+          command -v rclone >/dev/null 2>&1 || curl -s https://rclone.org/install.sh | sudo bash
+          rclone sync workspace r2:$R2_BUCKET/workspace --transfers 4 --stats-one-line 2>&1 | tail -n 20
+          echo "R2 sync done to s3://$R2_BUCKET/workspace"
 
       - name: Push Workspace to Git Branch (infinite persistence)
         if: always()

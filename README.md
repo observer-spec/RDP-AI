@@ -20,15 +20,19 @@ Run an ephemeral Linux cloud desktop (XFCE4 + Chrome + KasmVNC at 60FPS) on GitH
 
 ## One-Time Setup (required before first run)
 
-The repo is public, so no credentials live in the code or logs. Add two repository secrets:
+The repo is public, so no credentials live in the code or logs. Add repository secrets:
 
 1. Go to **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 2. Add:
 
-| Secret | Purpose |
-|--------|---------|
-| `VNC_PASSWORD` | Desktop login password (user: `runner`) |
-| `MCP_TOKEN` | Bearer token protecting the MCP API (`/call`, `/mcp`, `/tools`) |
+| Secret | Purpose | Required |
+|--------|---------|----------|
+| `VNC_PASSWORD` | Desktop login password (user: `runner`) | ✅ |
+| `MCP_TOKEN` | Bearer token protecting the MCP API (`/call`, `/mcp`, `/tools`) | ✅ |
+| `R2_ACCOUNT_ID` | Cloudflare R2 Account ID (for infinite workspace) | ⭕ Optional |
+| `R2_ACCESS_KEY_ID` | R2 API Token Access Key | ⭕ Optional |
+| `R2_SECRET_ACCESS_KEY` | R2 API Token Secret | ⭕ Optional |
+| `R2_BUCKET` | R2 bucket name (default `rdp-ai-workspace`) | ⭕ Optional |
 
 Without these secrets the workflow refuses to start.
 
@@ -41,7 +45,18 @@ Without these secrets the workflow refuses to start.
 ## MCP Endpoints
 - `/health` — unauthenticated liveness probe.
 - `/tools`, `/call`, `/mcp` — require header: `Authorization: Bearer <your MCP_TOKEN>`.
+- **New:** `tmux_session` — persistent tmux. `{"action":"create","session":"dev","command":"npm run dev"}` → survives between calls. Actions: `create/list/send/capture/kill`.
+
+### MCP Examples
+```bash
+# persistent bot that survives 5h
+curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp>/call -d '{"name":"tmux_session","arguments":{"action":"create","session":"bot","command":"python bot.py"}}'
+# check output 10min later
+curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp>/call -d '{"name":"tmux_session","arguments":{"action":"capture","session":"bot","lines":50}}'
+```
 
 ## Maintenance
 - **Rebuild the desktop image:** push changes to `Dockerfile`/`entrypoint.sh`, or run **Build Prebaked Desktop Image** manually. The runner pulls `ghcr.io/observer-spec/rdp-ai:latest`.
-- **Workspace cache:** rolling window of 5; older caches are pruned automatically after each run.
+- **Workspace cache:** rolling window of 5; older caches pruned automatically.
+- **Workspace persistence (3 layers):** `actions/cache` → `workspace-data` git branch → **R2** (if configured, syncs every 30min + on exit, restores on boot). R2 free tier = 10GB forever.
+- **R2 setup:** Create R2 bucket in Cloudflare Dashboard → API Token → add 4 secrets above → next run auto-syncs.
