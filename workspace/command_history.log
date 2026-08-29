@@ -1,0 +1,27 @@
+[2026-08-22 23:48:12] CMD: echo DISPLAY=$DISPLAY; ls /tmp/.X11-unix/; which scrot; DISPLAY=:1 scrot --version 2>&1 | head -1
+[2026-08-22 23:48:32] CMD: docker exec desktop sh -c "apt list --installed 2>/dev/null | grep -c scrot; DISPLAY=:1 scrot -z /tmp/desk.png && ls -la /tmp/desk.png"
+[2026-08-22 23:48:52] CMD: docker exec desktop cp /tmp/desk.png /workspace/desk.png && ls -la /workspace/desk.png
+[2026-08-22 23:49:09] CMD: docker cp desktop:/tmp/desk.png ./desk.png && chmod 644 desk.png && ls -la desk.png
+[2026-08-22 23:49:24] CMD: base64 -w0 desk.png
+[2026-08-29 04:03:03] CMD: uname -a && ls -la workspace | head -n 20
+[2026-08-29 04:03:09] BROWSER_GOTO: https://example.com (Title: Example Domain)
+[2026-08-29 04:03:09] PYTHON_EVAL: import os, sys
+print(f"Hello from RDP-AI! Python {sys.versio...
+[2026-08-29 04:03:10] MEMORY_STORE: key='demo'
+[2026-08-29 04:08:03] PYTHON_EVAL: print("Hello from RDP-AI cloud! ")
+import sys, platform, os
+...
+[2026-08-29 04:08:04] CMD: pwd && ls -la && echo "---" && cat /etc/os-release | head -n 3
+[2026-08-29 04:08:06] WRITE_FILE: /home/runner/work/RDP-AI/RDP-AI/workspace/demo.py (173 bytes)
+[2026-08-29 04:08:07] CMD: python3 workspace/demo.py
+[2026-08-29 04:08:12] CMD: python3 demo.py && echo "--- files:" && ls -lh
+[2026-08-29 04:08:14] CMD: pip install -q cowsay 2>&1 | tail -n 2 && python3 -c "import cowsay; cowsay.cow(\"Hello from your cloud RDP!\")"
+[2026-08-29 04:08:43] BROWSER_GOTO: https://news.ycombinator.com (Title: Hacker News)
+[2026-08-29 04:08:48] BROWSER_GOTO: https://news.ycombinator.com (Title: Hacker News)
+[2026-08-29 04:08:49] BROWSER_GOTO: https://example.com (Title: Example Domain)
+[2026-08-29 04:08:49] TAKE_SCREENSHOT: Browser captured
+[2026-08-29 04:08:53] TAKE_SCREENSHOT: Browser captured
+[2026-08-29 04:08:54] PYTHON_EVAL: import math
+print("Generating ASCII chart...")
+for y in rang...
+[2026-08-29 04:08:54] WRITE_FILE: /home/runner/work/RDP-AI/RDP-AI/workspace/hello_from_ai.txt (153 bytes)
