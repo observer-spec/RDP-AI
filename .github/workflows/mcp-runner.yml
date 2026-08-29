@@ -273,6 +273,42 @@ jobs:
           - **Browser:** Google Chrome (shortcut on desktop)
           SUMMARY
 
+      - name: Auto-Update README with Live URLs
+        run: |
+          # Update README.md <!-- LIVE_URLS_START --> block with current tunnel URLs
+          DESKTOP_URL="${DESKTOP_URL:-$(head -n1 tunnel-urls.txt 2>/dev/null)}"
+          MCP_URL="${MCP_URL:-$(sed -n '2p' tunnel-urls.txt 2>/dev/null)}"
+          [ -z "$DESKTOP_URL" ] && DESKTOP_URL="https://unknown-desktop.trycloudflare.com"
+          [ -z "$MCP_URL" ] && MCP_URL="https://unknown-mcp.trycloudflare.com"
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Build replacement block
+          cat > /tmp/new_block.txt <<BLOCK
+          <!-- LIVE_URLS_START -->
+          > **Current Run:** [Desktop](${DESKTOP_URL}) \`$DESKTOP_URL\` | [MCP](${MCP_URL}) \`$MCP_URL\` /mcp
+          > *Last updated: $TIMESTAMP — [Run #${{ github.run_number }}]($RUN_URL) — auto-updated by workflow*
+          > Desktop login: \`runner\` / \`VNC_PASSWORD\` — MCP: \`Authorization: Bearer \$MCP_TOKEN\` at \`/mcp\`
+          <!-- LIVE_URLS_END -->
+          BLOCK
+          # Replace in README.md
+          python3 <<'PY'
+          import re, pathlib
+          readme = pathlib.Path("README.md")
+          text = readme.read_text()
+          new_block = pathlib.Path("/tmp/new_block.txt").read_text().strip()
+          new_text, n = re.subn(r"<!-- LIVE_URLS_START -->.*?<!-- LIVE_URLS_END -->", new_block, text, flags=re.DOTALL)
+          if n == 0:
+              print("WARN: no LIVE_URLS markers found")
+          else:
+              readme.write_text(new_text)
+              print(f"README updated with {new_block[:80]}...")
+          PY
+          git config user.name "rdp-bot"
+          git config user.email "bot@rdp.local"
+          git add README.md
+          git diff --cached --quiet || git commit -m "docs: update live URLs $DESKTOP_URL / $MCP_URL [skip ci]" || true
+          git push 2>&1 | tail -n 5
+
       - name: Publish Tunnel URLs Artifact
         uses: actions/upload-artifact@v4
         with:

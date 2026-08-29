@@ -2,13 +2,21 @@
 
 Run an ephemeral Linux cloud desktop (XFCE4 + Chrome + KasmVNC at 60FPS) on GitHub Actions, exposed through free Cloudflare tunnels. Includes an MCP server for AI agent control.
 
+## 🔴 Live Status
+<!-- LIVE_URLS_START -->
+> **Current Run:** https://utils-terrorism-insights-refers.trycloudflare.com (Desktop) | https://eating-patents-booth-rural.trycloudflare.com (MCP)
+> *Last updated: 2026-08-29 04:03 UTC — Run #33232802809 — auto-updated by workflow*
+> Desktop login: `runner` / `VNC_PASSWORD` — MCP: `Authorization: Bearer $MCP_TOKEN` at `/mcp`
+<!-- LIVE_URLS_END -->
+
 ## Features
 - **Web Desktop:** KasmVNC streaming (WebP/H.264, 60 FPS) in any browser.
 - **MCP Server:** Compatible with MCP AI agents (Claude Desktop, Cursor, Hermes, etc.).
 - **Cloudflare Tunnels:** Free, zero-config public endpoints via `*.trycloudflare.com`.
 - **Prebaked Image:** Desktop stack ships as a container image on ghcr.io — boots in seconds, not minutes.
-- **Persistent Workspace:** `workspace/` survives between runs via Actions cache.
+- **Persistent Workspace:** `workspace/` survives between runs via Actions cache + `workspace-data` branch (infinite).
 - **Single-Instance Guard:** New dispatches automatically cancel zombie runs.
+- **Infinite Survival:** Auto-heal tunnels + auto-respawn at 4.5h → never dies.
 
 ## One-Time Setup (required before first run)
 
