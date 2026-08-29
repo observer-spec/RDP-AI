@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "rdp-ai": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://investigate-james-text-advertisements.trycloudflare.com/mcp",
+        "--header",
+        "Authorization: Bearer ${MCP_TOKEN}"
+      ]
+    }
+  }
+}
