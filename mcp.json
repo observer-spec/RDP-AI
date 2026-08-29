@@ -5,9 +5,9 @@
       "args": [
         "-y",
         "mcp-remote",
-        "https://investigate-james-text-advertisements.trycloudflare.com/mcp",
+        "https://eating-patents-booth-rural.trycloudflare.com/mcp",
         "--header",
-        "Authorization: Bearer ${MCP_TOKEN}"
+        "Authorization: Bearer demo-mcp-12345"
       ]
     }
   }
