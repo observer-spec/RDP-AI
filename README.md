@@ -4,8 +4,8 @@ Run an ephemeral Linux cloud desktop (XFCE4 + Chrome + KasmVNC at 60FPS) on GitH
 
 ## 🔴 Live Status
 <!-- LIVE_URLS_START -->
-> **Current Run:** [Desktop](https://shift-stanford-price-quoted.trycloudflare.com) `https://shift-stanford-price-quoted.trycloudflare.com` | [MCP](https://engineers-simon-pioneer-bodies.trycloudflare.com) `https://engineers-simon-pioneer-bodies.trycloudflare.com` /mcp
-> *Last updated: 2026-09-02 18:28 UTC — [Run #65](https://github.com/observer-spec/RDP-AI/actions/runs/33667212892) — auto-updated by workflow*
+> **Current Run:** [Desktop](https://adjustments-passport-designs-chains.trycloudflare.com) `https://adjustments-passport-designs-chains.trycloudflare.com` | [MCP](https://sets-obligations-kilometers-pal.trycloudflare.com) `https://sets-obligations-kilometers-pal.trycloudflare.com` /mcp
+> *Last updated: 2026-09-02 22:26 UTC — [Run #66](https://github.com/observer-spec/RDP-AI/actions/runs/33690161180) — auto-updated by workflow*
 > Desktop login: `runner` / `VNC_PASSWORD` — MCP: `Authorization: Bearer $MCP_TOKEN` at `/mcp`
 <!-- LIVE_URLS_END -->
 
