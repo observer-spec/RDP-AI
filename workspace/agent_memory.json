@@ -2,5 +2,9 @@
   "demo": {
     "value": "MCP live at 04:03 UTC, token demo-mcp-12345 works!",
     "updated_at": "2026-08-29 04:03:10"
+  },
+  "party": {
+    "value": "Muse threw a party on runner 33233604289 at 04:27 UTC \u2014 tmux party ticks + AI_PARTY.txt created, verified live via MCP",
+    "updated_at": "2026-08-29 04:27:36"
   }
 }
