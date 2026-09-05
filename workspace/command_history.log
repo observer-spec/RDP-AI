@@ -42,3 +42,36 @@ for y in rang...
 [2026-08-29 14:31:38] CMD: cd /tmp/typesense-3021-1788013474 && cmake --build build --target typesense-test -j2
 [2026-08-29 14:31:59] CMD: cd /tmp/typesense-3021-1788013474 && grep -E 'CMAKE_GENERATOR:|CMAKE_PROJECT_NAME:|CMAKE_HOME_DIRECTORY' build/CMakeCache.txt; ls -la build/CMakeFiles | head; cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON
 [2026-08-29 14:33:52] CMD: cd /tmp/typesense-3021-1788013474 && nohup sh -c 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --target typesense-test -j2' > /tmp/typesense-build.log 2>&1 & echo BUILD_PID=$!
+[2026-09-05 12:54:29] CMD: ps aux | grep -E "xrdp|vnc" | grep -v grep; echo ---; ss -tlnp 2>/dev/null | head -n 12 || netstat -tlnp 2>/dev/null | head -n 12
+[2026-09-05 12:55:10] CMD: (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | head -n 15; echo ---; tail -n 25 /var/log/xrdp.log 2>/dev/null || ls /var/log/xrdp* 2>/dev/null || echo no-xrdp-log
+[2026-09-05 12:57:59] CMD: ss -tlnp 2>/dev/null | grep 3389; echo ---; sudo -n true 2>&1 && echo ELEV_OK || echo ELEV_DENIED; echo ---; ls -la /var/log/xrdp* ~/xrdp.log 2>/dev/null; echo ---; ps aux | grep '[x]rdp' | head -n 5
+[2026-09-05 12:58:36] CMD: sudo ss -tlnp | grep 3389; echo ---; sudo cat /proc/$(pgrep -o xrdp)/cmdline 2>/dev/null | tr '\0' ' '; echo; ls -l /proc/$(pgrep -o xrdp)/fd 2>/dev/null | grep -c socket
+[2026-09-05 12:58:57] CMD: sudo kill 2599; sleep 2; sudo bash -c 'nohup /usr/sbin/xrdp -n >/tmp/xrdp.out 2>&1 &' ; sleep 3; ps aux | grep '[x]rdp' | head -n 3; echo ---; head -n 20 /tmp/xrdp.out
+[2026-09-05 12:59:58] CMD: sudo docker exec desktop cat /xrdp.log 2>/dev/null | tail -n 30; echo ---LOG-END---; sudo docker exec desktop ls -la /usr/lib/x86_64-linux-gnu/xrdp/ 2>/dev/null | head; echo ---; sudo docker exec desktop cat /etc/xrdp/xrdp.ini 2>/dev/null | head -n 12
+[2026-09-05 13:00:20] CMD: sudo docker exec desktop ls /usr/lib/x86_64-linux-gnu/xrdp/ | grep -E 'vnc|rdp|sesman'; echo ---; sudo docker exec desktop /usr/sbin/xrdp; sleep 2; sudo docker exec desktop sh -c 'ps aux | grep [x]rdp'; echo ---; ( sudo docker exec desktop cat /xrdp.log 2>/dev/null || echo NOLOG ) | tail -n 15
+[2026-09-05 13:02:54] CMD: docker exec desktop ps aux | grep -i xrdp; echo '--- LOG: ---'; docker exec desktop cat /var/log/xrdp.log 2>/dev/null || docker exec desktop cat /tmp/xrdp.log 2>/dev/null
+[2026-09-05 13:02:58] CMD: docker exec desktop cat /etc/xrdp/xrdp.ini
+[2026-09-05 13:03:01] CMD: docker exec desktop find /etc -name '*xrdp*' 2>/dev/null; docker exec desktop which xrdp; docker exec desktop ps aux
+[2026-09-05 13:03:04] CMD: which docker; id; docker ps
+[2026-09-05 13:03:18] CMD: docker exec desktop cat /etc/xrdp/xrdp.ini
+[2026-09-05 13:03:21] CMD: docker exec desktop ss -tlnp; echo '---'; docker exec desktop ls -la /etc/xrdp/
+[2026-09-05 13:03:25] CMD: docker exec desktop ls -la /etc/ssl/certs/ssl-cert-snakeoil.pem /etc/ssl/private/ssl-cert-snakeoil.key
+[2026-09-05 13:03:53] CMD: docker exec desktop id xrdp; docker exec desktop ps aux
+[2026-09-05 13:03:56] CMD: docker exec desktop id -Gn xrdp; docker exec desktop grep ssl-cert /etc/group
+[2026-09-05 13:04:05] CMD: docker exec desktop adduser xrdp ssl-cert; docker exec desktop pkill xrdp; sleep 1; docker exec desktop /usr/sbin/xrdp; docker exec desktop ps aux | grep xrdp
+[2026-09-05 13:04:23] CMD: docker exec desktop tail -n 15 /xrdp.log
+[2026-09-05 13:04:25] CMD: docker exec desktop find / -name '*xrdp.log*' 2>/dev/null
+[2026-09-05 13:04:28] CMD: docker exec desktop tail -n 25 /var/log/xrdp.log
+[2026-09-05 13:04:34] CMD: docker exec desktop python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 3389)); s.sendall(bytes.fromhex('030000130ee0000000000100080003000000')); print('LOCAL READ:', s.recv(64).hex())"
+[2026-09-05 13:06:34] CMD: docker exec desktop xrdp -v
+[2026-09-05 13:06:34] CMD: echo hello
+[2026-09-05 13:06:47] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['docker', ...
+[2026-09-05 13:06:50] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['netstat',...
+[2026-09-05 13:06:53] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['docker', ...
+[2026-09-05 13:06:56] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['docker', ...
+[2026-09-05 13:06:58] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['docker', ...
+[2026-09-05 13:07:01] PYTHON_EVAL: import subprocess
+print(subprocess.check_output(['docker', '...
+[2026-09-05 13:07:15] PYTHON_EVAL: import subprocess; print(subprocess.check_output(['docker', ...
+[2026-09-05 13:07:18] PYTHON_EVAL: import subprocess
+print(subprocess.check_output(['docker', '...
