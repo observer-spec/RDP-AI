@@ -2,9 +2,7 @@
 workspace/agent_memory.json
 workspace/command_history.log
 workspace/desktop_screenshot.jpg
-tunnel.log
-tunnel-mcp.log
-tunnel-urls.txt
+tailnet-endpoint.txt
 __pycache__/
 *.pyc
 .env.mcp

@@ -1,4 +1,4 @@
-"""Dispatch the Cloudflare MCP Runner workflow. Fixed arg handling."""
+"""Dispatch the Tailscale MCP Runner workflow."""
 import argparse
 import os
 import sys

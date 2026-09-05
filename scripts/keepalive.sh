@@ -1,23 +1,13 @@
 #!/bin/sh
-# Keep-alive loop (~5h40m): heal tunnels, R2 sync every 30min, MCP health, auto-respawn at 4.5h.
+# Keep-alive loop (~5h40m): tailnet check, R2 sync every 30min, MCP health, auto-respawn at 4.5h.
 # Needs: GH_TOKEN, GITHUB_REPOSITORY, optional R2_* env.
 set -e
-heal_tunnel() {
-  url_port=$1
-  log_file=$2
-  if ! pgrep -f "cloudflared tunnel.*$url_port" > /dev/null 2>&1; then
-    echo "⚠️ Tunnel :$url_port died, healing..."
-    pkill -f "cloudflared tunnel.*$url_port" 2>/dev/null || true
-    cloudflared tunnel --url http://127.0.0.1:$url_port 2>&1 | tee -a "$log_file" &
-    sleep 5
-    NEW_URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$log_file" | tail -n 1 || true)
-    [ -n "$NEW_URL" ] && echo "✓ Healed :$url_port → $NEW_URL"
-  fi
-}
 for tick in $(seq 1 68); do
   echo "Runner tick $tick/68: $(date) — uptime $((tick*5))min"
-  heal_tunnel 8443 tunnel.log
-  heal_tunnel 8000 tunnel-mcp.log
+  if ! tailscale ip -4 >/dev/null 2>&1; then
+    echo "⚠️ Tailscale looks down (tailscale ip failed). Leaving recovery to the watchdog respawn;"
+    tailscale status 2>&1 | head -n 5 || true
+  fi
   if [ $((tick % 6)) -eq 0 ] && [ -n "$R2_ACCOUNT_ID" ]; then
     echo "📦 R2 sync tick $tick..."
     sh scripts/r2_common.sh sync || true
