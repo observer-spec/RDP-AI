@@ -36,31 +36,24 @@ jobs:
           args: --accept-routes
 
       - name: Enable Windows Remote Desktop (RDP)
-        shell: pwsh
+        shell: cmd
         run: |
-          Write-Host "Enabling RDP in registry..."
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          echo Enabling RDP in registry...
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
           
-          Write-Host "Configuring Windows Firewall for RDP..."
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          echo Configuring Windows Firewall for RDP...
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
           
-          Write-Host "Disabling Windows password complexity policy..."
+          echo Disabling password complexity policy...
           secedit /export /cfg C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg -Encoding ascii
+          powershell -Command "(Get-Content C:\secpol.cfg).replace('PasswordComplexity = 1', 'PasswordComplexity = 0').replace('MinimumPasswordLength = 8', 'MinimumPasswordLength = 0') | Out-File C:\secpol.cfg -Encoding ascii"
           secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item -Force C:\secpol.cfg
+          del /f /q C:\secpol.cfg
           
-          Write-Host "Setting password for user 'runneradmin' and 'runner'..."
-          $pass = $env:RDP_PASSWORD
-          net user runneradmin $pass
-          net user runner $pass 2>$null
-          
-          Write-Host "Disabling NLA requirement (allows all RDP clients)..."
-          try {
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -ErrorAction SilentlyContinue
-          } catch {
-            Write-Host "Warning setting UserAuthentication: $_"
-          }
+          echo Setting password for runneradmin...
+          net user runneradmin %RDP_PASSWORD%
+          echo Setting password done.
 
       - name: Announce Endpoints and Update README
         shell: pwsh
