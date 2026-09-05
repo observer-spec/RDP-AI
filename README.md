@@ -4,10 +4,10 @@ Ephemeral Ubuntu desktop (XFCE4 + Chrome + KasmVNC) on GitHub Actions, reachable
 
 ## 🔴 Live Status
 <!-- LIVE_URLS_START -->
-> **Current Run (Tailscale, tailnet only):** [Desktop](https://100.123.104.43:8443) `https://100.123.104.43:8443` | [MCP](http://100.123.104.43:8000) `http://100.123.104.43:8000` /mcp
-> *Last updated: 2026-09-05 12:49 UTC — [Run #90](https://github.com/observer-spec/RDP-AI/actions/runs/33967061560) — auto-updated by workflow*
+> **Current Run (Tailscale, tailnet only):** [Desktop](https://100.94.93.46:8443) `https://100.94.93.46:8443` | [MCP](http://100.94.93.46:8000) `http://100.94.93.46:8000` /mcp
+> *Last updated: 2026-09-05 14:05 UTC — [Run #92](https://github.com/observer-spec/RDP-AI/actions/runs/33970714356) — auto-updated by workflow*
 > Desktop login: `runner` / `VNC_PASSWORD` (accept self-signed cert) — MCP: `Authorization: Bearer $MCP_TOKEN` at `/mcp`
-> RDP (Windows Remote Desktop): `100.123.104.43:3389` — same login
+> RDP (Windows Remote Desktop): `100.94.93.46:3389` — same login
 <!-- LIVE_URLS_END -->
 
 The active run also publishes `CURRENT_TAILSCALE_ENDPOINT.md` (tailnet-only addresses, expires with the run).
