@@ -85,25 +85,24 @@ jobs:
           Write-Host "================================================="
           
           $endpointMd = @"
-          # Active Windows RDP Endpoint (Tailscale)
-          
-          Private to your tailnet. Active run on \`windows-latest\`.
-          
-          - **RDP Address:** \`$tsIp:3389\`
-          - **Username:** \`runneradmin\` (or \`runner\`)
-          - **Password:** Configured in \`VNC_PASSWORD\` secret (or dispatch input)
-          "@
-          
+# Active Windows RDP Endpoint (Tailscale)
+
+Private to your tailnet. Active run on \`windows-latest\`.
+
+- **RDP Address:** \`$tsIp:3389\`
+- **Username:** \`runneradmin\`
+- **Password:** Configured in \`VNC_PASSWORD\` secret (or dispatch input)
+"@
           Set-Content -Path CURRENT_TAILSCALE_ENDPOINT.md -Value $endpointMd
           
           # Auto-update README live section
           $readme = Get-Content README.md -Raw
           $replacement = @"
-          <!-- LIVE_URLS_START -->
-          > **Current Run (Windows RDP, Tailscale):** \`$tsIp:3389\`
-          > *Login: \`runneradmin\` / password from \`VNC_PASSWORD\` secret*
-          <!-- LIVE_URLS_END -->
-          "@
+<!-- LIVE_URLS_START -->
+> **Current Run (Windows RDP, Tailscale):** \`$tsIp:3389\`
+> *Login: \`runneradmin\` / password from \`VNC_PASSWORD\` secret*
+<!-- LIVE_URLS_END -->
+"@
           $readme = $readme -replace '(?s)<!-- LIVE_URLS_START -->.*?<!-- LIVE_URLS_END -->', $replacement
           Set-Content -Path README.md -Value $readme
           
