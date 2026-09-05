@@ -24,7 +24,7 @@ The active run also publishes `CURRENT_TAILSCALE_ENDPOINT.md` (tailnet-only addr
 ## Features
 - **Web Desktop:** KasmVNC streaming (WebP/H.264, 60 FPS) in any browser.
 - **MCP Server:** 15 tools for agents (browser, files, exec, tmux, memory, system).
-- **Private access:** Tailscale tailnet only — no public URLs. Desktop at `https://<tailnet-ip>:8443`, MCP at `http://<tailnet-ip>:8000`. (WireGuard encrypts the tailnet, so plain HTTP is fine.)
+- **Private access:** Tailscale tailnet only — no public URLs. Desktop at `https://<tailnet-ip>:8443`, RDP (Windows Remote Desktop) at `<tailnet-ip>:3389`, MCP at `http://<tailnet-ip>:8000`. (WireGuard encrypts the tailnet, so plain HTTP is fine.)
 - **Prebaked Image:** boots in seconds, live-install fallback.
 - **Persistent Workspace:** `actions/cache` → `workspace-data` branch → **R2** (optional).
 - **Single-Instance Guard:** new dispatch cancels zombies.
@@ -49,7 +49,7 @@ Install Tailscale on your computer and join the same tailnet. Without it the run
 ## Start
 1. **Actions → Tailscale MCP Runner → Run workflow** (keep `use_prebaked_image=true`).
 2. Open the run — Job Summary shows the tailnet desktop + MCP addresses.
-3. Log in with `runner` + your `VNC_PASSWORD` (accept the self-signed cert).
+3. Log in with `runner` + your `VNC_PASSWORD` (accept the self-signed cert) — browser or `mstsc` to `<tailnet-ip>:3389`, same screen either way.
 
 Or via CLI: `OBSERVER_GITHUB_TOKEN=... python3 start_runner.py --auth-token ...`
 

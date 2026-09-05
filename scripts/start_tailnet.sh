@@ -30,6 +30,14 @@ TAILSCALE_IP=$(tailscale ip -4 2>/dev/null | head -n 1 || true)
 # Allow tailnet traffic to both services (belt and braces, like MobileDevice).
 sudo iptables -I INPUT -i tailscale0 -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
 sudo iptables -I INPUT -i tailscale0 -p tcp --dport 8000 -j ACCEPT 2>/dev/null || true
+sudo iptables -I INPUT -i tailscale0 -p tcp --dport 3389 -j ACCEPT 2>/dev/null || true
+
+# --- Health check: RDP (xrdp :3389) should answer (warn-only: web+MCP are the gates) ---
+if timeout 5 bash -c '</dev/tcp/127.0.0.1/3389' 2>/dev/null; then
+  echo "RDP (xrdp) is up on :3389."
+else
+  echo "::warning::RDP :3389 not answering (web desktop + MCP still live)"
+fi
 
 DESKTOP_TAILNET="https://$TAILSCALE_IP:8443"
 MCP_TAILNET="http://$TAILSCALE_IP:8000"
@@ -48,6 +56,7 @@ cat > CURRENT_TAILSCALE_ENDPOINT.md <<EOF
 Private to your tailnet. Expires when the workflow ends.
 
 - **Desktop:** $DESKTOP_TAILNET (login: \`runner\` / \`VNC_PASSWORD\`, accept the self-signed cert)
+- **RDP (Windows Remote Desktop):** $TAILSCALE_IP:3389 (same login)
 - **MCP:** $MCP_TAILNET/mcp (\`Authorization: Bearer \$MCP_TOKEN\`)
 EOF
 
@@ -64,6 +73,7 @@ cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
 # ⚡ Live Cloud Desktop & MCP Server (Tailscale)
 
 - **Desktop:** \`$DESKTOP_TAILNET\` (tailnet only, accept self-signed cert)
+- **RDP:** \`$TAILSCALE_IP:3389\` via Windows Remote Desktop (tailnet only, same login)
 - **MCP:** \`$MCP_TAILNET\`/mcp (tailnet only)
 - **Login:** user + password come from repo secrets (\`VNC_USER\` / \`VNC_PASSWORD\`)
 - **Browser:** Google Chrome (shortcut on desktop)

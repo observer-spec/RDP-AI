@@ -15,6 +15,8 @@ if not desktop or not mcp:
         mcp = mcp or (lines[1] if len(lines) > 1 else "")
 desktop = desktop or "https://<tailnet-ip>:8443"
 mcp = mcp or "http://<tailnet-ip>:8000"
+rdp_host = re.search(r"https?://([^/:]+)", desktop)
+rdp = f"{rdp_host.group(1)}:3389" if rdp_host else "<tailnet-ip>:3389"
 
 timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 repo = os.environ.get("GITHUB_REPOSITORY", "observer-spec/RDP-AI")
@@ -27,6 +29,7 @@ block = (
     f"> **Current Run (Tailscale, tailnet only):** [Desktop]({desktop}) `{desktop}` | [MCP]({mcp}) `{mcp}` /mcp\n"
     f"> *Last updated: {timestamp} — [Run #{run_number}]({run_url}) — auto-updated by workflow*\n"
     "> Desktop login: `runner` / `VNC_PASSWORD` (accept self-signed cert) — MCP: `Authorization: Bearer $MCP_TOKEN` at `/mcp`\n"
+    f"> RDP (Windows Remote Desktop): `{rdp}` — same login\n"
     "<!-- LIVE_URLS_END -->"
 )
 

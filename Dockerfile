@@ -12,7 +12,7 @@ ADD https://github.com/kasmtech/KasmVNC/releases/download/v1.5.0/kasmvncserver_n
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         xfce4 xfce4-terminal xfce4-goodies dbus-x11 scrot openssl wget curl ca-certificates \
-        libu2f-udev libvulkan1 python3 python3-pip supervisor tini tmux rclone \
+        libu2f-udev libvulkan1 python3 python3-pip supervisor tini tmux rclone xrdp \
     && apt-get install -y /tmp/chrome.deb /tmp/kasmvnc.deb \
     && rm -f /tmp/chrome.deb /tmp/kasmvnc.deb \
     && rm -rf /var/lib/apt/lists/*
@@ -46,9 +46,11 @@ RUN mkdir -p ~/.vnc ~/Desktop && touch ~/.Xauthority \
     && chmod +x ~/Desktop/Google-Chrome.desktop
 
 COPY entrypoint.sh /entrypoint.sh
+COPY scripts/xrdp.ini /etc/xrdp/xrdp.ini
 USER root
 RUN chmod +x /entrypoint.sh
-USER runner
+# entrypoint runs as root (sets VNC+RDP passwords, starts xrdp) then drops to runner for the desktop
+USER root
 
-EXPOSE 8443
+EXPOSE 8443 3389
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

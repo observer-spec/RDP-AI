@@ -74,4 +74,12 @@ desktop:
 EOF
 
 vncserver :1 -select-de xfce -websocketPort 8443 -cert /home/runner/.vnc/self.crt -key /home/runner/.vnc/self.key
+
+# RDP via xrdp (attaches to the same :1 screen through local VNC; same login)
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xrdp
+sudo cp "${GITHUB_WORKSPACE:-$PWD}/scripts/xrdp.ini" /etc/xrdp/xrdp.ini
+printf '%s:%s\n' "$VNC_USER" "$VNC_PASS" | sudo chpasswd
+sudo mkdir -p /var/run/xrdp
+sudo /usr/sbin/xrdp || echo "::warning::xrdp failed to start (web desktop unaffected)"
+
 echo "DISPLAY=:1" >> "$GITHUB_ENV"
