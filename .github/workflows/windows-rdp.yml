@@ -44,6 +44,12 @@ jobs:
           Write-Host "Configuring Windows Firewall for RDP..."
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           
+          Write-Host "Disabling Windows password complexity policy..."
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Out-File C:\secpol.cfg -Encoding ascii
+          secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\secpol.cfg
+          
           Write-Host "Setting password for user 'runneradmin' and 'runner'..."
           $pass = $env:RDP_PASSWORD
           net user runneradmin $pass
