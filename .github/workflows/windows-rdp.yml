@@ -1,0 +1,109 @@
+name: Windows RDP (Tailscale)
+
+on:
+  workflow_dispatch:
+    inputs:
+      rdp_pass:
+        description: 'Optional override for RDP password (defaults to VNC_PASSWORD secret)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 */5 * * *' # watchdog auto-respawn
+
+concurrency:
+  group: rdp-runner
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  rdp-session:
+    runs-on: windows-latest
+    timeout-minutes: 360 # up to 6 hours max GitHub runner limit
+    env:
+      RDP_PASSWORD: ${{ github.event.inputs.rdp_pass || secrets.VNC_PASSWORD || 'Runner123456!' }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Join Tailscale network
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          version: latest
+          args: --accept-routes
+
+      - name: Enable Windows Remote Desktop (RDP)
+        shell: pwsh
+        run: |
+          Write-Host "Enabling RDP in registry..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          
+          Write-Host "Configuring Windows Firewall for RDP..."
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          
+          Write-Host "Setting password for user 'runneradmin' and 'runner'..."
+          $pass = $env:RDP_PASSWORD
+          net user runneradmin $pass
+          net user runner $pass 2>$null
+          
+          Write-Host "Disabling NLA requirement (allows all RDP clients)..."
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+
+      - name: Announce Endpoints and Update README
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tsIp = (tailscale ip -4).Trim()
+          Write-Host "================================================="
+          Write-Host "🚀 WINDOWS REMOTE DESKTOP ONLINE"
+          Write-Host "IP: $tsIp:3389"
+          Write-Host "Username: runneradmin (or runner)"
+          Write-Host "================================================="
+          
+          $endpointMd = @"
+          # Active Windows RDP Endpoint (Tailscale)
+          
+          Private to your tailnet. Active run on \`windows-latest\`.
+          
+          - **RDP Address:** \`$tsIp:3389\`
+          - **Username:** \`runneradmin\` (or \`runner\`)
+          - **Password:** Configured in \`VNC_PASSWORD\` secret (or dispatch input)
+          "@
+          
+          Set-Content -Path CURRENT_TAILSCALE_ENDPOINT.md -Value $endpointMd
+          
+          # Auto-update README live section
+          $readme = Get-Content README.md -Raw
+          $replacement = @"
+          <!-- LIVE_URLS_START -->
+          > **Current Run (Windows RDP, Tailscale):** \`$tsIp:3389\`
+          > *Login: \`runneradmin\` / password from \`VNC_PASSWORD\` secret*
+          <!-- LIVE_URLS_END -->
+          "@
+          $readme = $readme -replace '(?s)<!-- LIVE_URLS_START -->.*?<!-- LIVE_URLS_END -->', $replacement
+          Set-Content -Path README.md -Value $readme
+          
+          git config user.name "observer-spec"
+          git config user.email "observer@amnuaysilpa.ac.th"
+          git add CURRENT_TAILSCALE_ENDPOINT.md README.md
+          git diff --quiet && git diff --staged --quiet || git commit -m "docs: update Windows RDP endpoint [skip ci]"
+          git push origin main || Write-Host "Could not push update to git, continuing..."
+
+      - name: Keep Alive (5h 30m)
+        shell: pwsh
+        run: |
+          Write-Host "Keeping session alive for 5h 30m..."
+          $totalSeconds = 19800
+          $interval = 60
+          $elapsed = 0
+          while ($elapsed -lt $totalSeconds) {
+            Start-Sleep -Seconds $interval
+            $elapsed += $interval
+            if ($elapsed % 600 -eq 0) {
+              Write-Host "Alive: $($elapsed / 60) minutes elapsed..."
+            }
+          }

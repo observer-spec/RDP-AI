@@ -1,0 +1,30 @@
+#!/bin/sh
+# Keep-alive loop (~5h40m): tailnet check, R2 sync every 30min, MCP health, auto-respawn at 4.5h.
+# Needs: GH_TOKEN, GITHUB_REPOSITORY, optional R2_* env.
+set -e
+for tick in $(seq 1 68); do
+  echo "Runner tick $tick/68: $(date) — uptime $((tick*5))min"
+  if ! tailscale ip -4 >/dev/null 2>&1; then
+    echo "⚠️ Tailscale looks down (tailscale ip failed). Leaving recovery to the watchdog respawn;"
+    tailscale status 2>&1 | head -n 5 || true
+  fi
+  if [ $((tick % 6)) -eq 0 ] && [ -n "$R2_ACCOUNT_ID" ]; then
+    echo "📦 R2 sync tick $tick..."
+    sh scripts/r2_common.sh sync || true
+  fi
+  if ! curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+    echo "⚠️ MCP /health failed, restarting server..."
+    pkill -f "server.py" 2>/dev/null || true
+    WORKSPACE_DIR="$PWD/workspace" python server.py &
+    sleep 3
+  fi
+  if [ "$tick" -eq 54 ]; then
+    echo "🔄 Chaining next runner for infinite uptime..."
+    gh workflow run mcp-runner.yml --ref main -f use_prebaked_image=true 2>&1 || \
+    curl -s -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/mcp-runner.yml/dispatches" \
+      -d '{"ref":"main","inputs":{"use_prebaked_image":"true"}}' 2>&1 | head
+    echo "✓ Next runner dispatched, this one will finish gracefully in ~50min"
+  fi
+  sleep 300
+done

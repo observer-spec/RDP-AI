@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "rdp-ai": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://<tailnet-ip>:8000/mcp",
+        "--header",
+        "Authorization: Bearer $MCP_TOKEN"
+      ]
+    }
+  }
+}

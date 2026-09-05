@@ -1,0 +1,8 @@
+# Runtime / generated — never commit
+workspace/agent_memory.json
+workspace/command_history.log
+workspace/desktop_screenshot.jpg
+tailnet-endpoint.txt
+__pycache__/
+*.pyc
+.env.mcp

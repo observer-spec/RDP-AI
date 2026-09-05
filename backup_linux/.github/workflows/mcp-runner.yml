@@ -1,0 +1,168 @@
+name: Tailscale MCP Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_prebaked_image:
+        description: 'Boot from prebaked ghcr.io image (fast) instead of installing live'
+        required: false
+        default: 'true'
+        type: boolean
+      auth_token:
+        description: 'Fallback MCP token — used ONLY if MCP_TOKEN secret is unset'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 */5 * * *' # watchdog: respawn if runner died (every 5h)
+  workflow_run:
+    workflows: ["Build Prebaked Desktop Image"]
+    types: [completed]
+
+# Only one desktop at a time — a new dispatch kills any zombie run automatically
+concurrency:
+  group: rdp-runner
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+  packages: write
+
+jobs:
+  run-mcp:
+    runs-on: ubuntu-latest
+    env:
+      AUTH_TOKEN: ${{ secrets.MCP_TOKEN || github.event.inputs.auth_token }}
+      VNC_USER: runner
+      VNC_PASS: ${{ secrets.VNC_PASSWORD }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Required Secrets
+        run: |
+          if [ -z "$AUTH_TOKEN" ]; then
+            echo "::error::No MCP auth token. Set the MCP_TOKEN secret (Settings -> Secrets and variables -> Actions), or pass the auth_token input."
+            exit 1
+          fi
+          if [ -z "$VNC_PASS" ]; then
+            echo "::error::No VNC password. Set the VNC_PASSWORD secret (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          if [ -z "${{ secrets.TAILSCALE_AUTHKEY }}" ]; then
+            echo "::error::No Tailscale auth key. Set the TAILSCALE_AUTHKEY secret (ephemeral, tagged auth key from your tailnet admin console)."
+            exit 1
+          fi
+
+      - name: Join Tailscale network (private access, like MobileDevice)
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: rdp-ai-${{ github.run_id }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore Workspace from Git Branch
+        continue-on-error: true
+        run: sh scripts/restore_workspace.sh
+
+      - name: Restore Persistent State & Workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: workspace
+          key: mcp-workspace-v1-${{ github.run_number }}
+          restore-keys: |
+            mcp-workspace-v1-
+
+      - name: Initialize Workspace Directory
+        run: mkdir -p workspace
+
+      - name: Setup R2 Sync & Restore (optional)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: sh scripts/r2_common.sh restore
+
+      - name: Install Desktop GUI (prebaked image)
+        if: ${{ inputs.use_prebaked_image != false }}
+        timeout-minutes: 5
+        run: sh scripts/desktop_prebaked.sh
+
+      - name: Install Desktop GUI (live fallback)
+        if: ${{ inputs.use_prebaked_image == false || failure() }}
+        timeout-minutes: 10
+        run: sh scripts/desktop_live.sh
+
+      - name: Install Python MCP Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install chromium
+          sudo apt-get update -qq && sudo apt-get install -y tmux rclone 2>&1 | tail -n 5 || true
+
+      - name: Start MCP Server on the tailnet
+        env:
+          WORKSPACE_DIR: ${{ github.workspace }}/workspace
+        run: sh scripts/start_tailnet.sh
+
+      - name: Auto-Update README with live endpoints
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 scripts/update_readme.py
+          git config user.name "rdp-bot"
+          git config user.email "bot@rdp.local"
+          git add README.md CURRENT_TAILSCALE_ENDPOINT.md
+          git diff --cached --quiet || git commit -m "docs: update Tailscale endpoints [skip ci]" || true
+          git push 2>&1 | tail -n 5
+
+      - name: Publish tailnet endpoint artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tailnet-endpoint
+          path: tailnet-endpoint.txt
+
+      - name: Keep Alive (~5h40m) + Auto-Respawn
+        timeout-minutes: 340
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: sh scripts/keepalive.sh
+
+      - name: Sync Workspace to R2 (always)
+        if: always()
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: sh scripts/r2_common.sh sync
+
+      - name: Push Workspace to Git Branch (always)
+        if: always()
+        run: sh scripts/workspace_push.sh
+
+      - name: Save Persistent State & Workspace Cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace
+          key: mcp-workspace-v1-${{ github.run_number }}
+
+      - name: Prune old workspace caches (keep 5)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/cache_prune.py
