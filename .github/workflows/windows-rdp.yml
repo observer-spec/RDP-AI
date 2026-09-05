@@ -33,7 +33,6 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           version: latest
-          args: --accept-routes
 
       - name: Enable Windows Remote Desktop (RDP)
         shell: cmd
@@ -60,11 +59,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tsIp = (tailscale ip -4).Trim()
+          $maxAttempts = 15
+          $tsIp = ""
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+            try {
+              $output = (tailscale ip -4 2>$null)
+              if ($output -and $output.Trim() -ne "") {
+                $tsIp = $output.Trim()
+                break
+              }
+            } catch {}
+            Write-Host "Waiting for Tailscale IP (attempt $i/$maxAttempts)..."
+            Start-Sleep -Seconds 3
+          }
+          
+          if (-not $tsIp) {
+            Write-Host "::error::Could not obtain Tailscale IP"
+            exit 1
+          }
+          
           Write-Host "================================================="
           Write-Host "🚀 WINDOWS REMOTE DESKTOP ONLINE"
           Write-Host "IP: $tsIp:3389"
-          Write-Host "Username: runneradmin (or runner)"
+          Write-Host "Username: runneradmin"
           Write-Host "================================================="
           
           $endpointMd = @"
