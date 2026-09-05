@@ -89,12 +89,12 @@ jobs:
         run: sh scripts/r2_common.sh restore
 
       - name: Install Desktop GUI (prebaked image)
-        if: ${{ inputs.use_prebaked_image }}
+        if: ${{ inputs.use_prebaked_image != false }}
         timeout-minutes: 5
         run: sh scripts/desktop_prebaked.sh
 
       - name: Install Desktop GUI (live fallback)
-        if: ${{ !inputs.use_prebaked_image || failure() }}
+        if: ${{ inputs.use_prebaked_image == false || failure() }}
         timeout-minutes: 10
         run: sh scripts/desktop_live.sh
 

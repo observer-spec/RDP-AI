@@ -58,7 +58,7 @@ dbus-launch --exit-with-session startxfce4 &
 EOF
 chmod +x ~/.vnc/xstartup
 
-echo -e "$VNC_PASS\n$VNC_PASS\n" | kasmvncpasswd -u "$VNC_USER" -o -w
+printf '%s\n%s\n' "$VNC_PASS" "$VNC_PASS" | kasmvncpasswd -u "$VNC_USER" -o -w
 
 cat << 'EOF' > ~/.vnc/kasmvnc.yaml
 network:
