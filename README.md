@@ -1,62 +1,68 @@
 # RDP-AI — Cloud Desktop & MCP Runner
 
-Run an ephemeral Linux cloud desktop (XFCE4 + Chrome + KasmVNC at 60FPS) on GitHub Actions, exposed through free Cloudflare tunnels. Includes an MCP server for AI agent control.
+Ephemeral Ubuntu desktop (XFCE4 + Chrome + KasmVNC) on GitHub Actions, exposed via Cloudflare tunnels, with an MCP server for agent control.
 
 ## 🔴 Live Status
 <!-- LIVE_URLS_START -->
-> **Current Run:** [Desktop](https://poster-vintage-demonstrates-subsidiaries.trycloudflare.com) `https://poster-vintage-demonstrates-subsidiaries.trycloudflare.com` | [MCP](https://ago-sensitivity-enforcement-dance.trycloudflare.com) `https://ago-sensitivity-enforcement-dance.trycloudflare.com` /mcp
-> *Last updated: 2026-09-05 08:52 UTC — [Run #86](https://github.com/observer-spec/RDP-AI/actions/runs/33956340819) — auto-updated by workflow*
-> Desktop login: `runner` / `VNC_PASSWORD` — MCP: `Authorization: Bearer $MCP_TOKEN` at `/mcp`
+> Runner is **offline**. Dispatch **Actions → Cloudflare MCP Runner → Run workflow** to get fresh URLs (README auto-updates on boot).
 <!-- LIVE_URLS_END -->
+
+## Layout
+- `server.py` — thin entrypoint (`python server.py`)
+- `src/` — real code: `app.py` routes, `tools.py` schemas, `handlers_browser.py`, `handlers_files.py`, `handlers_sys.py`, `config.py`, `browser.py`
+- `scripts/` — workflow steps: `desktop_prebaked.sh`, `desktop_live.sh`, `start_tunnels.sh`, `keepalive.sh`, `r2_common.sh`, `restore_workspace.sh`, `workspace_push.sh`, `update_readme.py`, `cache_prune.py`
+- `Dockerfile` / `entrypoint.sh` — prebaked image (`ghcr.io/observer-spec/rdp-ai:latest`)
+- `requirements.txt` — Python deps
+- `start_runner.py` — dispatch helper (`--auth-token`, `--ref`, `--no-prebaked`)
+- `mcp.json` — client template (replace `<mcp-tunnel>` + `$MCP_TOKEN` after a run)
+- `workspace/` — persistent files only (survives via cache → `workspace-data` branch → R2)
 
 ## Features
 - **Web Desktop:** KasmVNC streaming (WebP/H.264, 60 FPS) in any browser.
-- **MCP Server:** Compatible with MCP AI agents (Claude Desktop, Cursor, Hermes, etc.).
-- **Cloudflare Tunnels:** Free, zero-config public endpoints via `*.trycloudflare.com`.
-- **Prebaked Image:** Desktop stack ships as a container image on ghcr.io — boots in seconds, not minutes.
-- **Persistent Workspace:** `workspace/` survives between runs via Actions cache + `workspace-data` branch (infinite).
-- **Single-Instance Guard:** New dispatches automatically cancel zombie runs.
-- **Infinite Survival:** Auto-heal tunnels + auto-respawn at 4.5h → never dies.
+- **MCP Server:** 15 tools for agents (browser, files, exec, tmux, memory, system).
+- **Cloudflare Tunnels:** free public endpoints via `*.trycloudflare.com`.
+- **Prebaked Image:** boots in seconds, live-install fallback.
+- **Persistent Workspace:** `actions/cache` → `workspace-data` branch → **R2** (optional).
+- **Single-Instance Guard:** new dispatch cancels zombies.
+- **Infinite Survival:** auto-heal tunnels + auto-respawn at 4.5h.
 
-## One-Time Setup (required before first run)
+## One-Time Setup
 
-The repo is public, so no credentials live in the code or logs. Add repository secrets:
-
-1. Go to **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
-2. Add:
+Public repo, so no credentials in code or logs. Add repository secrets (**Settings → Secrets and variables → Actions**):
 
 | Secret | Purpose | Required |
 |--------|---------|----------|
 | `VNC_PASSWORD` | Desktop login password (user: `runner`) | ✅ |
-| `MCP_TOKEN` | Bearer token protecting the MCP API (`/call`, `/mcp`, `/tools`) | ✅ |
-| `R2_ACCOUNT_ID` | Cloudflare R2 Account ID (for infinite workspace) | ⭕ Optional |
-| `R2_ACCESS_KEY_ID` | R2 API Token Access Key | ⭕ Optional |
-| `R2_SECRET_ACCESS_KEY` | R2 API Token Secret | ⭕ Optional |
-| `R2_BUCKET` | R2 bucket name (default `rdp-ai-workspace`) | ⭕ Optional |
+| `MCP_TOKEN` | Bearer token for `/call`, `/mcp`, `/tools` | ✅ |
+| `R2_ACCOUNT_ID` | R2 account ID | ⭕ Optional |
+| `R2_ACCESS_KEY_ID` | R2 access key | ⭕ Optional |
+| `R2_SECRET_ACCESS_KEY` | R2 secret | ⭕ Optional |
+| `R2_BUCKET` | Bucket name (default `rdp-ai-workspace`) | ⭕ Optional |
 
-Without these secrets the workflow refuses to start.
+## Start
+1. **Actions → Cloudflare MCP Runner → Run workflow** (keep `use_prebaked_image=true`).
+2. Open the run — Job Summary shows live desktop + MCP URLs.
+3. Log in with `runner` + your `VNC_PASSWORD`.
 
-## How to Start the Runner
-1. Go to **Actions** → **Cloudflare MCP Runner** → **Run workflow**.
-2. Keep `use_prebaked_image` on `true` for a fast boot (falls back to live install automatically if the image is missing).
-3. Open the run — the Job Summary shows the live `trycloudflare.com` desktop URL.
-4. Log in with user `runner` + your `VNC_PASSWORD` secret value.
+Or via CLI: `OBSERVER_GITHUB_TOKEN=... python start_runner.py --auth-token ...`
 
 ## MCP Endpoints
-- `/health` — unauthenticated liveness probe.
-- `/tools`, `/call`, `/mcp` — require header: `Authorization: Bearer <your MCP_TOKEN>`.
-- **New:** `tmux_session` — persistent tmux. `{"action":"create","session":"dev","command":"npm run dev"}` → survives between calls. Actions: `create/list/send/capture/kill`.
+- `/health` — unauthenticated probe.
+- `/tools`, `/call`, `/mcp` — require `Authorization: Bearer <MCP_TOKEN>`.
+- `tmux_session` — persistent tmux: `{"action":"create","session":"dev","command":"npm run dev"}`. Actions: `create/list/send/capture/kill`.
 
-### MCP Examples
 ```bash
-# persistent bot that survives 5h
-curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp>/call -d '{"name":"tmux_session","arguments":{"action":"create","session":"bot","command":"python bot.py"}}'
-# check output 10min later
-curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp>/call -d '{"name":"tmux_session","arguments":{"action":"capture","session":"bot","lines":50}}'
+# connect (after a run gives you the tunnel host)
+# copy mcp.json and replace <mcp-tunnel> + $MCP_TOKEN
+
+# persistent bot
+curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp-tunnel>.trycloudflare.com/call \
+  -d '{"name":"tmux_session","arguments":{"action":"create","session":"bot","command":"python bot.py"}}'
+# check later
+curl -H "Authorization: Bearer $MCP_TOKEN" -X POST https://<mcp-tunnel>.trycloudflare.com/call \
+  -d '{"name":"tmux_session","arguments":{"action":"capture","session":"bot","lines":50}}'
 ```
 
 ## Maintenance
-- **Rebuild the desktop image:** push changes to `Dockerfile`/`entrypoint.sh`, or run **Build Prebaked Desktop Image** manually. The runner pulls `ghcr.io/observer-spec/rdp-ai:latest`.
-- **Workspace cache:** rolling window of 5; older caches pruned automatically.
-- **Workspace persistence (3 layers):** `actions/cache` → `workspace-data` git branch → **R2** (if configured, syncs every 30min + on exit, restores on boot). R2 free tier = 10GB forever.
-- **R2 setup:** Create R2 bucket in Cloudflare Dashboard → API Token → add 4 secrets above → next run auto-syncs.
+- **Rebuild image:** push to `Dockerfile`/`entrypoint.sh`, or run **Build Prebaked Desktop Image**.
+- **Workspace (3 layers):** cache (rolling 5) → `workspace-data` branch → **R2** (every 30min + on exit, restores on boot).

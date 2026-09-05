@@ -5,9 +5,9 @@
       "args": [
         "-y",
         "mcp-remote",
-        "https://bloggers-con-oct-emotional.trycloudflare.com/mcp",
+        "https://<mcp-tunnel>.trycloudflare.com/mcp",
         "--header",
-        "Authorization: Bearer demo-mcp-12345"
+        "Authorization: Bearer $MCP_TOKEN"
       ]
     }
   }
