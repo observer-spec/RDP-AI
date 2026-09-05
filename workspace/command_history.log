@@ -42,6 +42,3 @@ for y in rang...
 [2026-08-29 14:31:38] CMD: cd /tmp/typesense-3021-1788013474 && cmake --build build --target typesense-test -j2
 [2026-08-29 14:31:59] CMD: cd /tmp/typesense-3021-1788013474 && grep -E 'CMAKE_GENERATOR:|CMAKE_PROJECT_NAME:|CMAKE_HOME_DIRECTORY' build/CMakeCache.txt; ls -la build/CMakeFiles | head; cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON
 [2026-08-29 14:33:52] CMD: cd /tmp/typesense-3021-1788013474 && nohup sh -c 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TEST=ON && cmake --build build --target typesense-test -j2' > /tmp/typesense-build.log 2>&1 & echo BUILD_PID=$!
-[2026-09-05 14:17:59] CMD: cat /xrdp.log 2>/dev/null || cat /var/log/xrdp.log 2>/dev/null | tail -n 25
-[2026-09-05 14:18:04] CMD: find / -name 'xrdp*.log' 2>/dev/null; ps aux | grep -E 'xrdp|vnc' | grep -v grep
-[2026-09-05 14:20:05] CMD: ps aux | grep -E 'xrdp|vnc' | head -n 10; echo '---PORTS---'; ss -tulpn 2>/dev/null | grep -E '3389|5901|8443'
